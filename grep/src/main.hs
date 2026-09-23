@@ -4,8 +4,19 @@ import qualified System.Environment as SysEnv
 
 main = do
     args <- SysEnv.getArgs
-    lines <- readFileLines (head args)
-    print lines
+    let (arg1:arg2:_) = args
+    lines <- readFileLines arg2
+    print (filter (\(_,l) -> l == arg1) (enumerate lines))
+
+doesLineContain substr [] = False
+--doesLineContain (c:cs) = 
+
+enumerate :: [a] -> [(Int,a)]
+enumerate [] = []
+enumerate [x] = [(0,x)]
+enumerate (x:xs) = [(0,x)] ++ map (\(n,x) -> (n+1,x)) (enumerate xs)
+
+first (x:xs) = x
 
 readFileLines :: FilePath -> IO [String]
 readFileLines path = do
@@ -22,6 +33,9 @@ splitByNewline c = [c]
 
 addToFront :: Char -> ([String] -> [String])
 addToFront c = \strings -> [[c] ++ (head strings)] ++ (tail strings);
+
+--last [x] = x
+--last (x:xs) = last xs
 
 takeAllButLast :: [n] -> [n]
 takeAllButLast [last] = []
