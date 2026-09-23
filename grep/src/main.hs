@@ -6,7 +6,9 @@ main = do
     args <- SysEnv.getArgs
     let (arg1:arg2:_) = args
     lines <- readFileLines arg2
-    print (filter (\(_,l) -> doesLineContain arg1 l) (enumerate lines))
+    sequence_ $ map putStrLn $ map formatResult (filter (\(_,l) -> doesLineContain arg1 l) (enumerate lines))
+
+formatResult (i,x) = "Line " ++ show (i+1) ++ ": " ++ x
 
 doesLineContain [] [] = True
 doesLineContain [] x = True
