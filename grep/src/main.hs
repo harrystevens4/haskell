@@ -4,19 +4,24 @@ import qualified System.Environment as SysEnv
 
 main = do
     args <- SysEnv.getArgs
-    fileContents <- readFile (head args)
-    print (splitByNewline fileContents)
+    lines <- readFileLines (head args)
+    print lines
 
+readFileLines :: FilePath -> IO [String]
 readFileLines path = do
-    readFile path
+    lines <- readFile path
+    return (splitByNewline lines)
 
 splitByNewline :: String -> [String]
-splitByNewline ('\n':cs) = (splitByNewline cs) ++ [[]]
-splitByNewline (c:cs) = addToHead c (splitByNewline cs)
+splitByNewline ('\n':cs) = [[]] ++ (splitByNewline cs)
+splitByNewline (c:cs) = addToFront c (splitByNewline cs)
 splitByNewline c = [c]
 
-addToHead :: Char -> ([String] -> [String])
-addToHead c = \strings -> (takeAllButLast strings) ++ [(last strings) ++ [c]]
+--addToHead :: Char -> ([String] -> [String])
+--addToHead c = \strings -> (takeAllButLast strings) ++ [[c] ++(last strings)]
+
+addToFront :: Char -> ([String] -> [String])
+addToFront c = \strings -> [[c] ++ (head strings)] ++ (tail strings);
 
 takeAllButLast :: [n] -> [n]
 takeAllButLast [last] = []
