@@ -6,10 +6,14 @@ main = do
     args <- SysEnv.getArgs
     let (arg1:arg2:_) = args
     lines <- readFileLines arg2
-    print (filter (\(_,l) -> l == arg1) (enumerate lines))
+    print (filter (\(_,l) -> doesLineContain arg1 l) (enumerate lines))
 
+doesLineContain [] [] = True
+doesLineContain [] x = True
 doesLineContain substr [] = False
---doesLineContain (c:cs) = 
+doesLineContain substr (c:cs) =
+    if c == (first substr) then doesLineContain (tail substr) cs
+    else doesLineContain substr cs
 
 enumerate :: [a] -> [(Int,a)]
 enumerate [] = []
