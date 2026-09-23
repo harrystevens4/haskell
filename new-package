@@ -1,0 +1,23 @@
+#!/bin/bash
+
+if [ -z "$1" ]
+then
+    echo "Please provide the name of the package"
+    exit 1
+fi
+
+if [ -d "$1" ]
+then
+    echo "Package already exists"
+    exit 1
+fi
+
+mkdir $1
+mkdir "$1/src"
+touch "$1/src/main.hs"
+cat > "$1/Makefile" << EOF
+$1 : src/main.hs
+	ghc \$^ -o \$@
+run : $1
+	./$1
+EOF
