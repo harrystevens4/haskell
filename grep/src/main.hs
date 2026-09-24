@@ -1,12 +1,15 @@
 module Main where
 
 import qualified System.Environment as SysEnv
+import System.IO
 
 main = do
     args <- SysEnv.getArgs
-    let (arg1:arg2:_) = args
-    lines <- readFileLines arg2
-    sequence_ $ map putStrLn $ map formatResult (filter (\(_,l) -> doesLineContain arg1 l) (enumerate lines))
+    case args of
+        (arg1:arg2:_) -> do
+            lines <- readFileLines arg2
+            sequence_ $ map putStrLn $ map formatResult (filter (\(_,l) -> doesLineContain arg1 l) (enumerate lines))
+        _ -> hPutStr stderr "Bad arguments\nUsage: grep [pattern] [file]\n"
 
 formatResult (i,x) = "Line " ++ show (i+1) ++ ": " ++ x
 
@@ -18,9 +21,12 @@ doesLineContain substr (c:cs) =
     else doesLineContain substr cs
 
 enumerate :: [a] -> [(Int,a)]
-enumerate [] = []
-enumerate [x] = [(0,x)]
-enumerate (x:xs) = [(0,x)] ++ map (\(n,x) -> (n+1,x)) (enumerate xs)
+enumerate l = myZip [0..] l
+
+myZip :: [a] -> [b] -> [(a,b)]
+myZip la [] = []
+myZip [] lb = []
+myZip (a:la) (b:lb) =  [(a,b)] ++ myZip la lb
 
 first (x:xs) = x
 
@@ -34,14 +40,8 @@ splitByNewline ('\n':cs) = [[]] ++ (splitByNewline cs)
 splitByNewline (c:cs) = addToFront c (splitByNewline cs)
 splitByNewline c = [c]
 
---addToHead :: Char -> ([String] -> [String])
---addToHead c = \strings -> (takeAllButLast strings) ++ [[c] ++(last strings)]
-
 addToFront :: Char -> ([String] -> [String])
 addToFront c = \strings -> [[c] ++ (head strings)] ++ (tail strings);
-
---last [x] = x
---last (x:xs) = last xs
 
 takeAllButLast :: [n] -> [n]
 takeAllButLast [last] = []
