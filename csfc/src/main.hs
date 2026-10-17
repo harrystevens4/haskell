@@ -3,7 +3,7 @@ import System.Environment as SysEnv
 import Text.Read hiding (lex)
 import Prelude hiding (lex,takeWhile)
 
-data Token = Literal Double | Operator Operator deriving (Show,Eq,Ord)
+data Token = Literal Double | Operator Operator deriving (Show,Eq)
 data Operator = Add | Sub | Div | Mult | LeftBracket | RightBracket deriving (Show,Eq)
 
 main = do
@@ -57,6 +57,9 @@ parseOperator '/' = Right Div
 parseOperator '*' = Right Mult
 parseOperator unparsable = Left $ "could not parse operator from \"" ++ [unparsable] ++ "\""
 
+instance Ord Token where
+    Literal a >= Literal b = a >= b
+    Operator a >= Operator b = a >= b
 instance Ord Operator where
     Add >= Add = True
     Add >= Sub = True
@@ -71,6 +74,7 @@ shunt ts = shuntHelper [] ts []
 
 --              stack      input      output
 shuntHelper :: [Token] -> [Token] -> [Token] -> Either String [Token]
+shuntHelper stack [] output = Right $ output ++ stack
 shuntHelper stack ((Operator LeftBracket):ts) output = shuntHelper ((Operator LeftBracket):stack) ts output
 shuntHelper stack ((Operator RightBracket):ts) output = result where
     newStack = case splitOnce (Operator RightBracket) stack of
@@ -81,16 +85,23 @@ shuntHelper stack ((Operator RightBracket):ts) output = result where
         Right (l,r) -> shuntHelper ((Operator LeftBracket):r) ts (pushStack l output)
 shuntHelper stack ((Operator op):ts) output = result where
     (opsToPush,newStack) = takeWhile (>= Operator op) stack
-    output = pushStack opsToPush output
-    result = shuntHelper ((Operator op):newStack) ts output
-shuntHelper stack ((Literal value):ts) output = shuntHelper ((Literal value):stack) ts output
-shuntHelper stack [] output = Right $ output ++ stack
+    newOutput = pushStack opsToPush output
+    result = shuntHelper ((Operator op):newStack) ts newOutput
+shuntHelper stack ((Literal value):ts) output = shuntHelper (stack) ts $ output ++ [Literal value]
 --
--- >>> shunt $ getRight $ lex "1 + 2"
--- Right [Literal 1.0]
+-- >>> shunt $ getRight $ lex "1 + 1 * 2"
+-- Right [Literal 1.0,Literal 1.0,Literal 2.0,Operator Mult,Operator Add]
+
+-- >>>shunt [Literal 1.0, Operator Add]
+
+-- >>> takeWhile (>= Operator Mult) [Operator Add]
+-- ([],[Operator Add])
+
+-- >>> pushStack [] [Literal 1]
+-- [Literal 1.0]
 
 pushStack :: [a] -> [a] -> [a]
-pushStack (x:xs) stack = pushStack xs (x:stack)
+pushStack (x:xs) stack = pushStack xs (stack ++ [x])
 pushStack [] stack = stack
 
 maybeHead :: [a] -> Maybe a
@@ -103,8 +114,8 @@ takeWhile p (x:xs)
     | p x       = (\(l,r) -> (x:l,r)) $ takeWhile p xs
     | otherwise = ([],x:xs)
 
--- >>> takeWhile (<= 5) [1..10]
--- ([1,2,3,4,5],[6,7,8,9,10])
+-- >>> takeWhile (<= 1) [1,2]
+-- ([1],[2])
 
 splitOnce :: Eq a => a -> [a] -> Maybe ([a],[a])
 splitOnce deliminator (top:base)
