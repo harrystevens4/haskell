@@ -2,6 +2,8 @@ module Main where
 import System.Environment as SysEnv
 import Text.Read hiding (lex)
 import Prelude hiding (lex,takeWhile)
+import System.Exit
+import Data.Char
 
 data Token = Literal Double | Operator Operator deriving (Show,Eq)
 data Operator = Add | Sub | Div | Mult | LeftBracket | RightBracket deriving (Show,Eq)
@@ -10,8 +12,8 @@ main = do
     args <- SysEnv.getArgs
     case args of
         [arg1] -> case calculate arg1 of
-            Right result -> print result
-            Left e -> putStrLn e
+            Right result -> print result >> exitSuccess
+            Left e -> putStrLn e >> exitFailure
         _ -> putStrLn "Usage: csfc \"expression\""
 
 calculate :: String -> Either String Double
@@ -27,9 +29,16 @@ lex :: String -> Either String [Token]
 lex [] = Right []
 -- ignore whitespace
 lex (' ':cs) = lex cs
+-- deal with minus sign association with literals
+lex (b:c:leftover)
+    | isNumber c && b == '-' = case (reads (b:c:leftover) :: [(Double,String)]) of
+        [(x,unparsed)] -> fmap (\ts -> Literal x : ts) $ lex unparsed
+        _ -> Left "error parsing double"
 -- parse single char operators
 lex (c:cs)
     | '0' <= c && c <= '9' = case (reads (c:cs) :: [(Double,String)]) of
+        -- add a space so that any minus sign directly following a literal is treated as an operator
+        [(x,'-':unparsed)] -> fmap (\ts -> Literal x : ts) $ lex $ '-':' ':unparsed
         [(x,unparsed)] -> fmap (\ts -> Literal x : ts) $ lex unparsed
         _ -> Left "error parsing double"
 -- parse brackets
@@ -39,6 +48,9 @@ lex (')':cs) = fmap (\xs -> (Operator RightBracket):xs) $ lex cs
 lex (c:cs) = case parseOperator c of
     Right op -> fmap (\x -> (Operator op) : x) $ lex cs
     Left e -> Left e
+
+-- >>> getRight . lex $ "10*(-4)"
+-- [Literal 10.0,Operator LeftBracket,Literal (-4.0),Operator RightBracket]
 
 rightOr :: b -> Maybe a -> Either b a
 rightOr b (Just a) = Right a
@@ -94,6 +106,9 @@ shuntHelper stack ((Literal value):ts) output = shuntHelper (stack) ts $ output 
 
 -- >>> shunt $ getRight $ lex "1 + 1 * 2"
 -- Right [Literal 1.0,Literal 1.0,Literal 2.0,Operator Mult,Operator Add]
+
+-- >>> shunt $ getRight $ lex "1+(-5)+1"
+-- Right [Literal 1.0,Literal 5.0,Operator Sub,Operator Add,Literal 1.0,Operator Add]
 
 -- >>> shunt $ getRight $ lex "(1 +2) * 3"
 -- Right [Literal 1.0,Literal 2.0,Operator Add,Literal 3.0,Operator Mult,Operator LeftBracket]
@@ -158,5 +173,23 @@ getOperatorFunc Mult = (*)
 getOperatorFunc Div = (/)
 
 applyOperator :: Operator -> [Double] -> Either String [Double]
-applyOperator operator (first:second:others) = Right $ ((getOperatorFunc operator) first second):others
+-- sub with one operand is making a number negative
+applyOperator Sub [first] = Right [0 - first]
+-- implicit 0 or 1 for operators without both operands
+applyOperator Add [first] = Right $ first:[]
+applyOperator operator [first] = Right $ ((getOperatorFunc operator) first 1):[]
+-- propper applicatino with 2 opperands
+applyOperator operator (first:second:others) = Right $ ((getOperatorFunc operator) second first):others
 applyOperator operator _ = Left "stack empty when applying operator"
+
+-- >>> eval $ getRight . shunt . getRight $ lex "1 - 2"
+-- Right (-1.0)
+
+-- >>> shunt . getRight $ lex "1 - 2"
+-- Right [Literal 1.0,Literal 2.0,Operator Sub]
+
+-- >>> getRight . shunt . getRight $ lex "5*(-3)"
+-- [Literal 5.0,Literal 3.0,Operator Sub,Operator Mult]
+
+-- >>> (-) 2 1
+-- 1
