@@ -6,7 +6,11 @@ import System.Exit
 import Data.Char
 
 data Token = Literal Double | Operator Operator deriving (Show,Eq)
-data Operator = Add | Sub | Div | Mult | LeftBracket | RightBracket deriving (Show,Eq)
+data Operator = 
+      Add         | Sub
+    | Div         | Mult
+    | Pow
+    | LeftBracket | RightBracket deriving (Show,Eq)
 
 main = do
     args <- SysEnv.getArgs
@@ -35,25 +39,19 @@ lex (b:c:leftover)
         _ -> Left "error parsing double"
 -- parse single char operators
 lex (c:cs)
-    | '0' <= c && c <= '9' = case (reads (c:cs) :: [(Double,String)]) of
+    | isNumber c = case (reads (c:cs) :: [(Double,String)]) of
         -- add a space so that any minus sign directly following a literal is treated as an operator
-        [(x,'-':unparsed)] -> fmap (\ts -> Literal x : ts) $ lex $ '-':' ':unparsed
-        [(x,unparsed)] -> fmap (\ts -> Literal x : ts) $ lex unparsed
+        [(x,'-':unparsed)] -> (\ts -> Literal x : ts) <$> (lex $ '-':' ':unparsed)
+        [(x,unparsed)] -> (\ts -> Literal x : ts) <$> (lex unparsed)
         _ -> Left "error parsing double"
 -- parse brackets
-lex ('(':cs) = fmap (\xs -> (Operator LeftBracket):xs) $ lex cs
-lex (')':cs) = fmap (\xs -> (Operator RightBracket):xs) $ lex cs
+lex ('(':cs) = (\xs -> (Operator LeftBracket):xs) <$> (lex cs)
+lex (')':cs) = (\xs -> (Operator RightBracket):xs) <$> (lex cs)
 -- parse an operator
-lex (c:cs) = case parseOperator c of
-    Right op -> fmap (\x -> (Operator op) : x) $ lex cs
-    Left e -> Left e
+lex (c:cs) = parseOperator c >>= \op -> (\x -> (Operator op) : x) `fmap` (lex cs)
 
 -- >>> getRight . lex $ "10*(-4)"
 -- [Literal 10.0,Operator LeftBracket,Literal (-4.0),Operator RightBracket]
-
-rightOr :: b -> Maybe a -> Either b a
-rightOr b (Just a) = Right a
-rightOr b Nothing = Left b
 
 maybeToEither :: a -> Maybe b -> Either a b
 maybeToEither e (Just x)  = Right x
@@ -70,19 +68,25 @@ parseOperator '+' = Right Add
 parseOperator '-' = Right Sub
 parseOperator '/' = Right Div
 parseOperator '*' = Right Mult
+parseOperator '^' = Right Pow
 parseOperator unparsable = Left $ "could not parse operator from \"" ++ [unparsable] ++ "\""
+
+operatorBindingPower :: Operator -> Int
+operatorBindingPower Add = 1
+operatorBindingPower Sub = 1
+operatorBindingPower Mult = 2
+operatorBindingPower Div = 2
+operatorBindingPower Pow = 3
+operatorBindingPower _ = 0
 
 instance Ord Token where
     Literal a >= Literal b = a >= b
     Operator a >= Operator b = a >= b
+    Literal a <= Literal b = a <= b
+    Operator a <= Operator b = a <= b
 instance Ord Operator where
-    Add >= Add = True
-    Add >= Sub = True
-    Sub >= Add = True
-    Sub >= Sub = True
-    Div >= _   = True
-    Mult >= _  = True
-    _ >= _ = False
+    x >= y = operatorBindingPower x >= operatorBindingPower y
+    x <= y = operatorBindingPower x <= operatorBindingPower y
 
 shunt :: [Token] -> Either String [Token]
 shunt ts = shuntHelper [] ts []
@@ -93,10 +97,10 @@ shuntHelper stack [] output = Right $ output ++ stack
 shuntHelper stack ((Operator LeftBracket):ts) output = shuntHelper ((Operator LeftBracket):stack) ts output
 shuntHelper stack ((Operator RightBracket):ts) output = do
     (l,r) <- maybeToEither "missing opening bracket" (splitOnce (Operator LeftBracket) stack)
-    shuntHelper r ts (pushStack l output)
+    shuntHelper r ts (output ++ l)
 shuntHelper stack ((Operator op):ts) output = result where
     (opsToPush,newStack) = takeWhile (>= Operator op) stack
-    newOutput = pushStack opsToPush output
+    newOutput = output ++ opsToPush
     result = shuntHelper ((Operator op):newStack) ts newOutput
 shuntHelper stack ((Literal value):ts) output = shuntHelper (stack) ts $ output ++ [Literal value]
 
@@ -117,13 +121,6 @@ shuntHelper stack ((Literal value):ts) output = shuntHelper (stack) ts $ output 
 -- >>> takeWhile (>= Operator Mult) [Operator Add]
 -- ([],[Operator Add])
 
--- >>> pushStack [] [Literal 1]
--- [Literal 1.0]
-
-pushStack :: [a] -> [a] -> [a]
-pushStack (x:xs) stack = pushStack xs (stack ++ [x])
-pushStack [] stack = stack
-
 maybeHead :: [a] -> Maybe a
 maybeHead (head:tail) = Just head
 maybeHead [] = Nothing
@@ -140,7 +137,7 @@ takeWhile p (x:xs)
 splitOnce :: Eq a => a -> [a] -> Maybe ([a],[a])
 splitOnce deliminator (top:base)
     | top == deliminator = Just ([],base)
-    | otherwise          = fmap (\(l,r) -> (top:l,r)) $ splitOnce deliminator base
+    | otherwise          = (\(l,r) -> (top:l,r)) <$> splitOnce deliminator base
 splitOnce deliminator [] = Nothing
 
 -- >>> splitOnce '=' "this=that"
@@ -170,6 +167,7 @@ getOperatorFunc Add = (+)
 getOperatorFunc Sub = (-)
 getOperatorFunc Mult = (*)
 getOperatorFunc Div = (/)
+getOperatorFunc Pow = (**)
 
 applyOperator :: Operator -> [Double] -> Either String [Double]
 -- sub with one operand is making a number negative
