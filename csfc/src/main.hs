@@ -77,20 +77,26 @@ shuntHelper :: [Token] -> [Token] -> [Token] -> Either String [Token]
 shuntHelper stack [] output = Right $ output ++ stack
 shuntHelper stack ((Operator LeftBracket):ts) output = shuntHelper ((Operator LeftBracket):stack) ts output
 shuntHelper stack ((Operator RightBracket):ts) output = result where
-    newStack = case splitOnce (Operator RightBracket) stack of
-        Nothing -> Left "missing closing bracket"
+    newStack = case splitOnce (Operator LeftBracket) stack of
+        Nothing -> Left "missing opening bracket"
         Just newStack -> Right newStack
     result = case newStack of
         Left e -> Left e
-        Right (l,r) -> shuntHelper ((Operator LeftBracket):r) ts (pushStack l output)
+        Right (l,r) -> shuntHelper r ts (pushStack l output)
 shuntHelper stack ((Operator op):ts) output = result where
     (opsToPush,newStack) = takeWhile (>= Operator op) stack
     newOutput = pushStack opsToPush output
     result = shuntHelper ((Operator op):newStack) ts newOutput
 shuntHelper stack ((Literal value):ts) output = shuntHelper (stack) ts $ output ++ [Literal value]
---
+
+-- >>> splitOnce (Operator LeftBracket) [Literal 1, Operator LeftBracket, Literal 2]
+-- Just ([Literal 1.0],[Literal 2.0])
+
 -- >>> shunt $ getRight $ lex "1 + 1 * 2"
 -- Right [Literal 1.0,Literal 1.0,Literal 2.0,Operator Mult,Operator Add]
+
+-- >>> shunt $ getRight $ lex "(1 +2) * 3"
+-- Right [Literal 1.0,Literal 2.0,Operator Add,Literal 3.0,Operator Mult,Operator LeftBracket]
 
 -- >>>shunt [Literal 1.0, Operator Add]
 
