@@ -11,19 +11,18 @@ data Operator = Add | Sub | Div | Mult | LeftBracket | RightBracket deriving (Sh
 main = do
     args <- SysEnv.getArgs
     case args of
-        [arg1] -> case calculate arg1 of
-            Right result -> print result >> exitSuccess
-            Left e -> putStrLn e >> exitFailure
+        [arg1] -> calculateThenPrint arg1
+        [] -> getContents >>= calculateThenPrint
         _ -> putStrLn "Usage: csfc \"expression\""
 
+calculateThenPrint :: String -> IO ()
+calculateThenPrint expr = case calculate expr of
+            Right result -> print result >> exitSuccess
+            Left e -> putStrLn e >> exitFailure
+
+
 calculate :: String -> Either String Double
-calculate expr = case lex expr of
-    Left e -> Left ("parse error: " ++ e)
-    Right tokens -> case shunt tokens of
-        Left e -> Left ("shunt error: " ++ e)
-        Right tokens -> case eval tokens of
-            Left e -> Left ("eval error: " ++ e)
-            Right result -> Right (result)
+calculate expr = lex expr >>= shunt >>= eval
 
 lex :: String -> Either String [Token]
 lex [] = Right []
@@ -55,6 +54,10 @@ lex (c:cs) = case parseOperator c of
 rightOr :: b -> Maybe a -> Either b a
 rightOr b (Just a) = Right a
 rightOr b Nothing = Left b
+
+maybeToEither :: a -> Maybe b -> Either a b
+maybeToEither e (Just x)  = Right x
+maybeToEither e (Nothing) = Left e
 
 -- >>> lex "1 2 +"
 -- Right [Literal 1.0,Literal 2.0,Operator Add]
@@ -88,13 +91,9 @@ shunt ts = shuntHelper [] ts []
 shuntHelper :: [Token] -> [Token] -> [Token] -> Either String [Token]
 shuntHelper stack [] output = Right $ output ++ stack
 shuntHelper stack ((Operator LeftBracket):ts) output = shuntHelper ((Operator LeftBracket):stack) ts output
-shuntHelper stack ((Operator RightBracket):ts) output = result where
-    newStack = case splitOnce (Operator LeftBracket) stack of
-        Nothing -> Left "missing opening bracket"
-        Just newStack -> Right newStack
-    result = case newStack of
-        Left e -> Left e
-        Right (l,r) -> shuntHelper r ts (pushStack l output)
+shuntHelper stack ((Operator RightBracket):ts) output = do
+    (l,r) <- maybeToEither "missing opening bracket" (splitOnce (Operator LeftBracket) stack)
+    shuntHelper r ts (pushStack l output)
 shuntHelper stack ((Operator op):ts) output = result where
     (opsToPush,newStack) = takeWhile (>= Operator op) stack
     newOutput = pushStack opsToPush output
