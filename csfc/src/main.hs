@@ -4,6 +4,7 @@ import Text.Read hiding (lex)
 import Prelude hiding (lex,takeWhile)
 import System.Exit
 import Data.Char
+import System.IO
 
 data Token = Literal Double | Operator Operator deriving (Show,Eq)
 data Operator = 
@@ -19,15 +20,17 @@ main = do
         [] -> getContents >>= calculateThenPrint
         _ -> putStrLn "Usage: csfc \"expression\""
 
+-- evaluate the expression then print the result or error
 calculateThenPrint :: String -> IO ()
 calculateThenPrint expr = case calculate expr of
-            Right result -> print result >> exitSuccess
-            Left e -> putStrLn e >> exitFailure
-
+        Right result -> print result >> exitSuccess
+        Left e -> hPutStrLn stderr e >> exitFailure 
 
 calculate :: String -> Either String Double
+-- such sexy syntax
 calculate expr = lex expr >>= shunt >>= eval
 
+-- im up in the club parsing it and by it i mean my lexemes
 lex :: String -> Either String [Token]
 lex [] = Right []
 -- ignore whitespace
@@ -53,6 +56,7 @@ lex (c:cs) = parseOperator c >>= \op -> (\x -> (Operator op) : x) `fmap` (lex cs
 -- >>> getRight . lex $ "10*(-4)"
 -- [Literal 10.0,Operator LeftBracket,Literal (-4.0),Operator RightBracket]
 
+-- cant find in standard library?
 maybeToEither :: a -> Maybe b -> Either a b
 maybeToEither e (Just x)  = Right x
 maybeToEither e (Nothing) = Left e
@@ -68,9 +72,10 @@ parseOperator '+' = Right Add
 parseOperator '-' = Right Sub
 parseOperator '/' = Right Div
 parseOperator '*' = Right Mult
-parseOperator '^' = Right Pow
+parseOperator '^' = Right Pow -- lexer doesnt support multi char operators
 parseOperator unparsable = Left $ "could not parse operator from \"" ++ [unparsable] ++ "\""
 
+-- higher binding power is higher order of operations precidence
 operatorBindingPower :: Operator -> Int
 operatorBindingPower Add = 1
 operatorBindingPower Sub = 1
@@ -79,6 +84,7 @@ operatorBindingPower Div = 2
 operatorBindingPower Pow = 3
 operatorBindingPower _ = 0
 
+-- compare by binding power
 instance Ord Token where
     Literal a >= Literal b = a >= b
     Operator a >= Operator b = a >= b
@@ -89,19 +95,25 @@ instance Ord Operator where
     x <= y = operatorBindingPower x <= operatorBindingPower y
 
 shunt :: [Token] -> Either String [Token]
+-- start with an empty stack and output
 shunt ts = shuntHelper [] ts []
 
+-- shunting yard algorithm to convert infix into postfix
 --              stack      input      output
 shuntHelper :: [Token] -> [Token] -> [Token] -> Either String [Token]
+-- pop stack onto output once we run out of input tokens
 shuntHelper stack [] output = Right $ output ++ stack
 shuntHelper stack ((Operator LeftBracket):ts) output = shuntHelper ((Operator LeftBracket):stack) ts output
 shuntHelper stack ((Operator RightBracket):ts) output = do
+    -- pop elements off the stack untill we find a matching opening bracket
     (l,r) <- maybeToEither "missing opening bracket" (splitOnce (Operator LeftBracket) stack)
     shuntHelper r ts (output ++ l)
 shuntHelper stack ((Operator op):ts) output = result where
+    -- pop elements off the stack untill we find an operator with a lower binding power
     (opsToPush,newStack) = takeWhile (>= Operator op) stack
     newOutput = output ++ opsToPush
     result = shuntHelper ((Operator op):newStack) ts newOutput
+-- literals go straight to the output
 shuntHelper stack ((Literal value):ts) output = shuntHelper (stack) ts $ output ++ [Literal value]
 
 -- >>> splitOnce (Operator LeftBracket) [Literal 1, Operator LeftBracket, Literal 2]
@@ -121,10 +133,7 @@ shuntHelper stack ((Literal value):ts) output = shuntHelper (stack) ts $ output 
 -- >>> takeWhile (>= Operator Mult) [Operator Add]
 -- ([],[Operator Add])
 
-maybeHead :: [a] -> Maybe a
-maybeHead (head:tail) = Just head
-maybeHead [] = Nothing
-
+-- put values from list into fst while predicate holds then place remaining in snd
 takeWhile :: Ord a => (a -> Bool) -> [a] -> ([a],[a])
 takeWhile p [] = ([],[])
 takeWhile p (x:xs)
@@ -134,15 +143,17 @@ takeWhile p (x:xs)
 -- >>> takeWhile (<= 1) [1,2]
 -- ([1],[2])
 
+-- split list on first occurence of deliminator (exclude it from output)
 splitOnce :: Eq a => a -> [a] -> Maybe ([a],[a])
 splitOnce deliminator (top:base)
-    | top == deliminator = Just ([],base)
+    | top == deliminator = Just ([],base) -- freaky ahh fmap
     | otherwise          = (\(l,r) -> (top:l,r)) <$> splitOnce deliminator base
 splitOnce deliminator [] = Nothing
 
 -- >>> splitOnce '=' "this=that"
 -- Just ("this","that")
 
+-- reverse polish notation is the goatttttttt
 eval :: [Token] -> Either String Double
 eval ts = evalHelper [] ts
 
@@ -152,6 +163,7 @@ eval ts = evalHelper [] ts
 getRight :: Either a b -> b
 getRight (Right b) = b
 
+-- stack based postfix expression evaluator
 evalHelper :: [Double] -> [Token] -> Either String Double
 -- base cases
 evalHelper [result] [] = Right result
@@ -167,7 +179,7 @@ getOperatorFunc Add = (+)
 getOperatorFunc Sub = (-)
 getOperatorFunc Mult = (*)
 getOperatorFunc Div = (/)
-getOperatorFunc Pow = (**)
+getOperatorFunc Pow = (**) -- this one supports fractional exponents
 
 applyOperator :: Operator -> [Double] -> Either String [Double]
 -- sub with one operand is making a number negative
