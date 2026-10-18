@@ -35,6 +35,9 @@ lex :: String -> Either String [Token]
 lex [] = Right []
 -- ignore whitespace
 lex (' ':cs) = lex cs
+lex ('\n':cs) = lex cs
+lex ('\r':cs) = lex cs
+lex ('\t':cs) = lex cs
 -- deal with minus sign association with literals
 lex (b:c:leftover)
     | isNumber c && b == '-' = case (reads (b:c:leftover) :: [(Double,String)]) of
