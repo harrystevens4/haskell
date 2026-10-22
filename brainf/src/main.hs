@@ -5,7 +5,7 @@ import Data.Maybe
 import Data.Word
 import Data.Char
 
-data Operator = Nested Token Int | Flat Token 
+data Operator = Jump Token Int | Operation Token
     deriving (Show, Eq)
 data Token =  JumpForwards
             | JumpBackwards
@@ -27,7 +27,11 @@ tokenCharacterTable = [
     (Input,           ','),
     (Output,          '.')]
 
-main = getContents >>= pure . parseDepth . lexer >>= run
+main = do 
+    file <- getContents
+    case parseDepth . lexer $ file of
+        (Just result) -> run result
+        Nothing -> putStrLn "failed to parse"
 
 filterMap :: (a -> Maybe b) -> [a] -> [b]
 filterMap f [] = []
@@ -48,16 +52,27 @@ lexer (c:cs) = case toToken c of
     Just t  -> t : lexer cs
     Nothing -> lexer cs
 
-parseDepth :: [Token] -> [Operator]
-parseDepth = parseDepthHelper 0
+parseDepth :: [Token] -> Maybe [Operator]
+parseDepth ts = parseDepthHelper [] (zip [0..] ts) >>= return . fst 
 
-parseDepthHelper :: Int -> [Token] -> [Operator]
-parseDepthHelper depth (JumpForwards:ts) = 
-    (Nested JumpForwards depth) : parseDepthHelper (depth+1) ts
-parseDepthHelper depth (JumpBackwards:ts) = 
-    (Nested JumpBackwards (depth-1)) : parseDepthHelper (depth-1) ts
-parseDepthHelper depth (t:ts) = Flat t : parseDepthHelper depth ts
-parseDepthHelper depth [] = []
+parseDepthHelper :: [Int] -> [(Int,Token)] -> Maybe ([Operator],[Int])
+-- forwards jump found
+parseDepthHelper forwardJumpStack ((i,JumpForwards):ts) = do
+    (output,backwardsJumpStack) <- parseDepthHelper (i:forwardJumpStack) ts
+    (matchingJump,remainingStack) <- uncons backwardsJumpStack
+    return ((Jump JumpForwards (matchingJump+1):output),remainingStack)
+-- backwards jump found
+parseDepthHelper forwardJumpStack ((i,JumpBackwards):ts) = do
+    (matchingJump,remainingStack) <- uncons forwardJumpStack
+    (parsedEnd,backwardsJumpStack) <- parseDepthHelper remainingStack ts
+    -- +1 so we go past the [ and dont get stuck
+    return ((Jump JumpBackwards (matchingJump+1)) : parsedEnd,i:backwardsJumpStack)
+-- any other token found
+parseDepthHelper forwardJumpStack ((i,t):ts) = 
+    (\(o,s) -> ((Operation t):o,s)) <$> parseDepthHelper forwardJumpStack ts
+
+-- base case
+parseDepthHelper _ [] = Just ([],[])
 
 run :: [Operator] -> IO ()
 run ts = evalLoop ts (listArray (0,255) ([0..255] >> [0])) 0 0 
@@ -65,24 +80,18 @@ run ts = evalLoop ts (listArray (0,255) ([0..255] >> [0])) 0 0
 evalLoop :: [Operator] -> Array Int Word8 -> Int -> Int -> IO ()
 evalLoop ts mem ip dp
     | (length) ts > ip = case ts !! ip of
-        Flat IncrementByte    -> evalLoop ts (mem // [(dp,(mem ! dp) + 1)]) (ip+1) dp
-        Flat DecrementByte    -> evalLoop ts (mem // [(dp,(mem ! dp) - 1)]) (ip+1) dp
-        Flat IncrementPointer -> evalLoop ts mem (ip+1) (dp+1)
-        Flat DecrementPointer -> evalLoop ts mem (ip+1) (dp-1)
-        Flat Input            -> inputByte >>= \b -> evalLoop ts (mem // [(dp,b)]) (ip+1) dp
-        Flat Output           -> outputByte (mem ! dp) >> evalLoop ts mem (ip+1) dp
-        Nested JumpForwards depth  -> if (mem ! dp) == 0
-            then evalLoop ts mem (matchingJumpBack+1) dp
+        Operation IncrementByte    -> evalLoop ts (mem // [(dp,(mem ! dp) + 1)]) (ip+1) dp
+        Operation DecrementByte    -> evalLoop ts (mem // [(dp,(mem ! dp) - 1)]) (ip+1) dp
+        Operation IncrementPointer -> evalLoop ts mem (ip+1) (dp+1)
+        Operation DecrementPointer -> evalLoop ts mem (ip+1) (dp-1)
+        Operation Input            -> inputByte >>= \b -> evalLoop ts (mem // [(dp,b)]) (ip+1) dp
+        Operation Output           -> outputByte (mem ! dp) >> evalLoop ts mem (ip+1) dp
+        Jump JumpForwards location  -> if (mem ! dp) == 0
+            then evalLoop ts mem location dp
             else evalLoop ts mem (ip+1) dp
-                where
-                    matchingJumpBack = fromJust $ elemIndex (Nested JumpBackwards depth) endList
-                    endList = drop ip ts
-        Nested JumpBackwards depth -> if (mem ! dp) /= 0
-            then evalLoop ts mem (matchingJumpForward+1) dp
+        Jump JumpBackwards location -> if (mem ! dp) /= 0
+            then evalLoop ts mem location dp
             else evalLoop ts mem (ip+1) dp
-                where
-                    matchingJumpForward = last $ elemIndices (Nested JumpForwards depth) (startList)
-                    startList = take ip ts
     | otherwise = return ()
 
 outputByte :: Word8 -> IO ()
@@ -97,8 +106,8 @@ testData = "++++++++[>++++[>++>+++>+++>+<<<<-]>+>+>->>+[<]<-]>>.>---.+++++++..++
 
 -- >>> putStrLn "epic"
 --
--- >>> last $ elemIndices (Nested JumpForwards 0) (take 14 (parseDepth . lexer $ "[]>[]++++++++++[.]"))
--- 12
+-- >>> (parseDepth . lexer $ "[[[]]][]")
+-- Just [Jump JumpForwards 6,Jump JumpForwards 5,Jump JumpForwards 4,Jump JumpBackwards 3,Jump JumpBackwards 2,Jump JumpBackwards 1,Jump JumpForwards 8,Jump JumpBackwards 7]
 
 -- >>> parseDepth . lexer $ testData
 -- [Flat IncrementByte,Flat IncrementByte,Flat IncrementByte,Flat IncrementByte,Flat IncrementByte,Flat IncrementByte,Flat IncrementByte,Flat IncrementByte,Nested JumpForwards 0,Flat IncrementPointer,Flat IncrementByte,Flat IncrementByte,Flat IncrementByte,Flat IncrementByte,Nested JumpForwards 1,Flat IncrementPointer,Flat IncrementByte,Flat IncrementByte,Flat IncrementPointer,Flat IncrementByte,Flat IncrementByte,Flat IncrementByte,Flat IncrementPointer,Flat IncrementByte,Flat IncrementByte,Flat IncrementByte,Flat IncrementPointer,Flat IncrementByte,Flat DecrementPointer,Flat DecrementPointer,Flat DecrementPointer,Flat DecrementPointer,Flat DecrementByte,Nested JumpBackwards 1,Flat IncrementPointer,Flat IncrementByte,Flat IncrementPointer,Flat IncrementByte,Flat IncrementPointer,Flat DecrementByte,Flat IncrementPointer,Flat IncrementPointer,Flat IncrementByte,Nested JumpForwards 1,Flat DecrementPointer,Nested JumpBackwards 1,Flat DecrementPointer,Flat DecrementByte,Nested JumpBackwards 0,Flat IncrementPointer,Flat IncrementPointer,Flat Output,Flat IncrementPointer,Flat DecrementByte,Flat DecrementByte,Flat DecrementByte,Flat Output,Flat IncrementByte,Flat IncrementByte,Flat IncrementByte,Flat IncrementByte,Flat IncrementByte,Flat IncrementByte,Flat IncrementByte,Flat Output,Flat Output,Flat IncrementByte,Flat IncrementByte,Flat IncrementByte,Flat Output,Flat IncrementPointer,Flat IncrementPointer,Flat Output,Flat DecrementPointer,Flat DecrementByte,Flat Output,Flat DecrementPointer,Flat Output,Flat IncrementByte,Flat IncrementByte,Flat IncrementByte,Flat Output,Flat DecrementByte,Flat DecrementByte,Flat DecrementByte,Flat DecrementByte,Flat DecrementByte,Flat DecrementByte,Flat Output,Flat DecrementByte,Flat DecrementByte,Flat DecrementByte,Flat DecrementByte,Flat DecrementByte,Flat DecrementByte,Flat DecrementByte,Flat DecrementByte,Flat Output,Flat IncrementPointer,Flat IncrementPointer,Flat IncrementByte,Flat Output,Flat IncrementPointer,Flat IncrementByte,Flat IncrementByte,Flat Output]
