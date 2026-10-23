@@ -4,6 +4,8 @@ import Data.Array
 import Data.Maybe
 import Data.Word
 import Data.Char
+import System.Environment
+import System.Exit
 
 data Operator = Jump Token Int | Operation Token
     deriving (Show, Eq)
@@ -28,10 +30,20 @@ tokenCharacterTable = [
     (Output,          '.')]
 
 main = do 
-    file <- getContents
-    case parseDepth . lexer $ file of
-        (Just result) -> run result
-        Nothing -> putStrLn "failed to parse"
+    args <- getArgs
+    case args of
+        [] -> showHelp
+        ["--help"] -> showHelp
+        ["-h"] -> showHelp
+        ["-"] -> getContents >>= execute
+        [filename] -> readFile filename >>= execute
+        where
+            execute c = case (parseDepth . lexer) c of
+                Just f  -> run f >> exitSuccess
+                Nothing -> putStrLn "parse error" >> exitFailure
+
+showHelp :: IO ()
+showHelp = putStrLn "usage: brainf <filename | '-'>"
 
 filterMap :: (a -> Maybe b) -> [a] -> [b]
 filterMap f [] = []
