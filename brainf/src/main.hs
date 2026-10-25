@@ -38,7 +38,7 @@ main = do
         ["-"] -> getContents >>= execute
         [filename] -> readFile filename >>= execute
         where
-            execute c = case (parseDepth . lexer) c of
+            execute c = case (parseJumps . lexer) c of
                 Just f  -> run f >> exitSuccess
                 Nothing -> putStrLn "parse error" >> exitFailure
 
@@ -64,27 +64,26 @@ lexer (c:cs) = case toToken c of
     Just t  -> t : lexer cs
     Nothing -> lexer cs
 
-parseDepth :: [Token] -> Maybe [Operator]
-parseDepth ts = parseDepthHelper [] (zip [0..] ts) >>= return . fst 
+parseJumps :: [Token] -> Maybe [Operator]
+parseJumps ts = parseJumpsHelper [] (zip [0..] ts) >>= return . fst 
 
-parseDepthHelper :: [Int] -> [(Int,Token)] -> Maybe ([Operator],[Int])
+parseJumpsHelper :: [Int] -> [(Int,Token)] -> Maybe ([Operator],[Int])
 -- forwards jump found
-parseDepthHelper forwardJumpStack ((i,JumpForwards):ts) = do
-    (output,backwardsJumpStack) <- parseDepthHelper (i:forwardJumpStack) ts
+parseJumpsHelper forwardJumpStack ((i,JumpForwards):ts) = do
+    (output,backwardsJumpStack) <- parseJumpsHelper (i:forwardJumpStack) ts
     (matchingJump,remainingStack) <- uncons backwardsJumpStack
     return ((Jump JumpForwards (matchingJump+1):output),remainingStack)
 -- backwards jump found
-parseDepthHelper forwardJumpStack ((i,JumpBackwards):ts) = do
+parseJumpsHelper forwardJumpStack ((i,JumpBackwards):ts) = do
     (matchingJump,remainingStack) <- uncons forwardJumpStack
-    (parsedEnd,backwardsJumpStack) <- parseDepthHelper remainingStack ts
+    (parsedEnd,backwardsJumpStack) <- parseJumpsHelper remainingStack ts
     -- +1 so we go past the [ and dont get stuck
     return ((Jump JumpBackwards (matchingJump+1)) : parsedEnd,i:backwardsJumpStack)
 -- any other token found
-parseDepthHelper forwardJumpStack ((i,t):ts) = 
-    (\(o,s) -> ((Operation t):o,s)) <$> parseDepthHelper forwardJumpStack ts
-
+parseJumpsHelper forwardJumpStack ((i,t):ts) = 
+    (\(o,s) -> ((Operation t):o,s)) <$> parseJumpsHelper forwardJumpStack ts
 -- base case
-parseDepthHelper _ [] = Just ([],[])
+parseJumpsHelper _ [] = Just ([],[])
 
 run :: [Operator] -> IO ()
 run ts = evalLoop ts (listArray (0,255) ([0..255] >> [0])) 0 0 
