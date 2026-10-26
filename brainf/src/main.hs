@@ -197,6 +197,22 @@ getLLVMforOp (i,Operation DecrementPointer) =
     [ printf "; shift data pointer right",
       printf "%%dp.new.%d = getelementptr [2 x i64], i8* %%dp, i64 -1" i,
       printf "store ptr %%dp.new.%d, ptr %%dp" i                         ]
+getLLVMforOp (i,Operation Output) = 
+    [ printf "; print byte",
+      printf "%%byte.%d = load i8, ptr %%dp" i,
+      printf "call i32 @putchar(i8 %%byte.%d)" i ]
+getLLVMforOp (i,Jump JumpForwards pos) = 
+    [ printf "; forwards jump",
+      printf "%%byte.%d = load i8, ptr %%dp" i,
+      printf "%%condition.%d = icmp eq i8 %%byte.%d, 0" i i,
+      printf "br i1 %%condition.%d, label %%instruction_%d, label %%no_op_%d" i pos i,
+      printf "no_op_%d:" i                                      ]
+getLLVMforOp (i,Jump JumpBackwards pos) = 
+    [ printf "; backwards jump",
+      printf "%%byte.%d = load i8, ptr %%dp" i,
+      printf "%%condition.%d = icmp ne i8 %%byte.%d, 0" i i,
+      printf "br i1 %%condition.%d, label %%instruction_%d, label %%no_op_%d" i pos i,
+      printf "no_op_%d:" i                                      ]
 getLLVMforOp _ = []
 
 flatten :: [[a]] -> [a]
