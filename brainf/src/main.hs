@@ -188,7 +188,7 @@ getLLVMforOp (i,Operation DecrementByte) =
     [ printf "; decrement value",
       printf "%%ptr.%d = load ptr, ptr %%dp" i,
       printf "%%byte.%d = load i8, ptr %%ptr.%d" i i,
-      printf "%%byte.new.%d = sub i8 1, %%byte.%d" i i,
+      printf "%%byte.new.%d = sub i8 %%byte.%d, 1" i i,
       printf "store i8 %%byte.new.%d, ptr %%ptr.%d" i i    ]
 getLLVMforOp (i,Operation IncrementPointer) = 
     [ printf "; shift data pointer right",
@@ -208,13 +208,15 @@ getLLVMforOp (i,Operation Output) =
       printf "call i32 @putchar(i32 %%int.%d)" i ]
 getLLVMforOp (i,Jump JumpForwards pos) = 
     [ printf "; forwards jump",
-      printf "%%byte.%d = load i8, ptr %%dp" i,
+      printf "%%ptr.%d = load ptr, ptr %%dp" i,
+      printf "%%byte.%d = load i8, ptr %%ptr.%d" i i,
       printf "%%condition.%d = icmp eq i8 %%byte.%d, 0" i i,
       printf "br i1 %%condition.%d, label %%instruction_%d, label %%instruction_%d" i pos (i+1),
       printf "instruction_%d:" (i+1)                                                            ]
 getLLVMforOp (i,Jump JumpBackwards pos) = 
     [ printf "; backwards jump",
-      printf "%%byte.%d = load i8, ptr %%dp" i,
+      printf "%%ptr.%d = load ptr, ptr %%dp" i,
+      printf "%%byte.%d = load i8, ptr %%ptr.%d" i i,
       printf "%%condition.%d = icmp ne i8 %%byte.%d, 0" i i,
       printf "br i1 %%condition.%d, label %%instruction_%d, label %%instruction_%d" i pos (i+1),
       printf "instruction_%d:" (i+1)                                                            ]
