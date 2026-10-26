@@ -1,5 +1,8 @@
 module Main where
 import Data.List
+import GHC.IO.Handle.Text
+import System.IO
+import Text.Printf
 import Data.Array
 import Data.Maybe
 import Data.Word
@@ -32,18 +35,33 @@ tokenCharacterTable = [
 main = do 
     args <- getArgs
     case args of
-        [] -> showHelp
-        ["--help"] -> showHelp
-        ["-h"] -> showHelp
-        ["-"] -> getContents >>= execute
-        [filename] -> readFile filename >>= execute
+        ["help"] -> showHelp
+        ["compile",input] -> do 
+            file <- readFile input
+            output <- return . compile $ file
+            flatMapEither (hPutStrLn stderr) (putStrLn) output
+        ["compile",inputFile,outputFile] -> do
+            input <- readFile inputFile
+            output <- return . compile $ input
+            flatMapEither (hPutStrLn stderr) (writeFile outputFile) output
+        ["interpret","-"] -> getContents >>= execute
+        ["interpret",filename] -> readFile filename >>= execute
+        _ -> showHelp
         where
             execute c = case (parseJumps . lexer) c of
                 Just f  -> run f >> exitSuccess
                 Nothing -> putStrLn "parse error" >> exitFailure
+            compile :: String -> Either String String
+            compile c = case (parseJumps . lexer $ c) of
+                Just ops -> Right $ compileToLLVM ops
+                Nothing -> Left "failed to parse"
 
 showHelp :: IO ()
 showHelp = putStrLn "usage: brainf <filename | '-'>"
+
+flatMapEither :: (a -> c) -> (b -> c) -> Either a b -> c
+flatMapEither fLeft _ (Left v) = fLeft v
+flatMapEither _ fRight (Right v) = fRight v
 
 filterMap :: (a -> Maybe b) -> [a] -> [b]
 filterMap f [] = []
@@ -112,6 +130,78 @@ inputByte :: IO Word8
 inputByte = getChar >>= return . fromIntegral . ord
 
 testData = "++++++++[>++++[>++>+++>+++>+<<<<-]>+>+>->>+[<]<-]>>.>---.+++++++..+++.>>.<-.<.+++.------.--------.>>+.>++."
+
+compileToLLVM :: [Operator] -> String
+compileToLLVM ops = (join '\n') . flatten $ [[""],functions,[""],globals,[""],generateMain ops]
+
+join :: Char -> [String] -> String
+join seperator [] = []
+join seperator (x:[]) = (x ++ [seperator])
+join seperator (x:xs) = (x ++ [seperator]) ++ join seperator xs
+
+globals = ["; globals"]
+
+functions = ["; libc declarations","declare i32 @putchar(i32) nounwind"]
+
+generateMain :: [Operator] -> [String]
+generateMain ops = 
+    ["define i32 @main() {"] ++ 
+    [indent "; ====== initial setup ======"] ++
+    (indent <$> initialMainSetup) ++ 
+    [indent "; ====== main program ======"] ++
+    (indent <$> (enumerate ops >>= generateLLVMForOp)) ++ 
+    [indent "; ====== terminate program ======"] ++
+    (indent <$> mainTermination) ++
+    ["}"]
+
+indent :: String -> String
+indent = ('\t' :)
+
+mainTermination = ["ret i32 0"]
+
+initialMainSetup =
+    ["; main mem",
+     "%memory = alloca i8, i64 1024",
+     "call void @llvm.memset.p0.i8(i8* %memory,i8 0,i32 1024,i1 false)",
+     "; data pointer",
+     "%dp = alloca i64",
+     "store i64 0, i64* %dp",
+     "%one_ptr = inttoptr i64 1 to ptr"                                 ]
+
+generateJumpLabel :: Int -> String
+generateJumpLabel i = "instruction_" ++ show i ++ ":"
+
+enumerate = zip [0..]
+
+generateLLVMForOp :: (Int,Operator) -> [String]
+generateLLVMForOp (i,op) = [generateJumpLabel i] ++ getLLVMforOp (i,op)
+
+getLLVMforOp :: (Int,Operator) -> [String]
+getLLVMforOp (i,Operation IncrementByte) = 
+    [ printf "; increment value",
+      printf "%%byte.%d = load i8, ptr %%dp" i,
+      printf "%%byte.new.%d = add i8 1, %%byte.%d" i i,
+      printf "store i8 %%byte.%d, ptr %%dp" i         ]
+getLLVMforOp (i,Operation DecrementByte) = 
+    [ printf "; decrement value",
+      printf "%%byte.%d = load i8, ptr %%dp" i,
+      printf "%%byte.new.%d = sub i8 1, %%byte.%d" i i,
+      printf "store i8 %%byte.%d, ptr %%dp" i         ]
+getLLVMforOp (i,Operation IncrementPointer) = 
+    [ printf "; shift data pointer left",
+      printf "%%dp.new.%d = getelementptr [2 x i64], i8* %%dp, i64 1" i,
+      printf "store ptr %%dp.new.%d, ptr %%dp" i                        ]
+getLLVMforOp (i,Operation DecrementPointer) = 
+    [ printf "; shift data pointer right",
+      printf "%%dp.new.%d = getelementptr [2 x i64], i8* %%dp, i64 -1" i,
+      printf "store ptr %%dp.new.%d, ptr %%dp" i                         ]
+getLLVMforOp _ = []
+
+flatten :: [[a]] -> [a]
+flatten = (>>= id)
+
+-- >>> flatten [[1,2],[3,4]]
+-- [1,2,3,4]
 
 -- >>> run . parseDepth . lexer $ ['+' | _ <- [1..97]] ++ "." ++  ">" ++ ['+' | _ <- [1..10]] ++ "."
 
