@@ -161,12 +161,11 @@ mainTermination = ["ret i32 0"]
 
 initialMainSetup =
     ["; main mem",
-     "%memory = alloca i8, i64 1024",
-     "call void @llvm.memset.p0.i8(i8* %memory,i8 0,i32 1024,i1 false)",
+     "%memory = alloca [1024 x i8]",
+     "call void @llvm.memset.p0.i64(ptr %memory, i8 0, i64 1024, i1 false)",
      "; data pointer",
-     "%dp = alloca i64",
-     "store i64 0, i64* %dp",
-     "%one_ptr = inttoptr i64 1 to ptr"                                 ]
+     "%dp = alloca ptr",
+     "store ptr %memory, ptr %dp"                                       ]
 
 generateJumpLabel :: Int -> [String]
 generateJumpLabel i = 
@@ -176,43 +175,49 @@ generateJumpLabel i =
 enumerate = zip [0..]
 
 generateLLVMForOp :: (Int,Operator) -> [String]
-generateLLVMForOp (i,op) = generateJumpLabel i ++ getLLVMforOp (i,op)
+generateLLVMForOp (i,op) = getLLVMforOp (i,op)
 
 getLLVMforOp :: (Int,Operator) -> [String]
 getLLVMforOp (i,Operation IncrementByte) = 
     [ printf "; increment value",
-      printf "%%byte.%d = load i8, ptr %%dp" i,
+      printf "%%ptr.%d = load ptr, ptr %%dp" i,
+      printf "%%byte.%d = load i8, ptr %%ptr.%d" i i,
       printf "%%byte.new.%d = add i8 1, %%byte.%d" i i,
-      printf "store i8 %%byte.%d, ptr %%dp" i         ]
+      printf "store i8 %%byte.new.%d, ptr %%ptr.%d" i i    ]
 getLLVMforOp (i,Operation DecrementByte) = 
     [ printf "; decrement value",
-      printf "%%byte.%d = load i8, ptr %%dp" i,
+      printf "%%ptr.%d = load ptr, ptr %%dp" i,
+      printf "%%byte.%d = load i8, ptr %%ptr.%d" i i,
       printf "%%byte.new.%d = sub i8 1, %%byte.%d" i i,
-      printf "store i8 %%byte.%d, ptr %%dp" i         ]
+      printf "store i8 %%byte.new.%d, ptr %%ptr.%d" i i    ]
 getLLVMforOp (i,Operation IncrementPointer) = 
-    [ printf "; shift data pointer left",
-      printf "%%dp.new.%d = getelementptr [2 x i64], i8* %%dp, i64 1" i,
+    [ printf "; shift data pointer right",
+      printf "%%ptr.%d = load ptr, ptr %%dp" i,
+      printf "%%dp.new.%d = getelementptr [2 x i8], ptr %%ptr.%d, i64 0, i64 1" i i,
       printf "store ptr %%dp.new.%d, ptr %%dp" i                        ]
 getLLVMforOp (i,Operation DecrementPointer) = 
-    [ printf "; shift data pointer right",
-      printf "%%dp.new.%d = getelementptr [2 x i64], i8* %%dp, i64 -1" i,
-      printf "store ptr %%dp.new.%d, ptr %%dp" i                         ]
+    [ printf "; shift data pointer left",
+      printf "%%ptr.%d = load ptr, ptr %%dp" i,
+      printf "%%dp.new.%d = getelementptr [2 x i8], ptr %%ptr.%d, i64 0, i64 -1" i i,
+      printf "store ptr %%dp.new.%d, ptr %%dp" i                        ]
 getLLVMforOp (i,Operation Output) = 
     [ printf "; print byte",
-      printf "%%byte.%d = load i8, ptr %%dp" i,
-      printf "call i32 @putchar(i8 %%byte.%d)" i ]
+      printf "%%ptr.%d = load ptr, ptr %%dp" i,
+      printf "%%byte.%d = load i8, ptr %%ptr.%d" i i,
+      printf "%%int.%d = sext i8 %%byte.%d to i32" i i,
+      printf "call i32 @putchar(i32 %%int.%d)" i ]
 getLLVMforOp (i,Jump JumpForwards pos) = 
     [ printf "; forwards jump",
       printf "%%byte.%d = load i8, ptr %%dp" i,
       printf "%%condition.%d = icmp eq i8 %%byte.%d, 0" i i,
-      printf "br i1 %%condition.%d, label %%instruction_%d, label %%no_op_%d" i pos i,
-      printf "no_op_%d:" i                                      ]
+      printf "br i1 %%condition.%d, label %%instruction_%d, label %%instruction_%d" i pos (i+1),
+      printf "instruction_%d:" (i+1)                                                            ]
 getLLVMforOp (i,Jump JumpBackwards pos) = 
     [ printf "; backwards jump",
       printf "%%byte.%d = load i8, ptr %%dp" i,
       printf "%%condition.%d = icmp ne i8 %%byte.%d, 0" i i,
-      printf "br i1 %%condition.%d, label %%instruction_%d, label %%no_op_%d" i pos i,
-      printf "no_op_%d:" i                                      ]
+      printf "br i1 %%condition.%d, label %%instruction_%d, label %%instruction_%d" i pos (i+1),
+      printf "instruction_%d:" (i+1)                                                            ]
 getLLVMforOp _ = []
 
 flatten :: [[a]] -> [a]
