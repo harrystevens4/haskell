@@ -168,13 +168,15 @@ initialMainSetup =
      "store i64 0, i64* %dp",
      "%one_ptr = inttoptr i64 1 to ptr"                                 ]
 
-generateJumpLabel :: Int -> String
-generateJumpLabel i = "instruction_" ++ show i ++ ":"
+generateJumpLabel :: Int -> [String]
+generateJumpLabel i = 
+    ["br label %instruction_" ++ show i] ++
+    ["instruction_" ++ show i ++ ":"]
 
 enumerate = zip [0..]
 
 generateLLVMForOp :: (Int,Operator) -> [String]
-generateLLVMForOp (i,op) = [generateJumpLabel i] ++ getLLVMforOp (i,op)
+generateLLVMForOp (i,op) = generateJumpLabel i ++ getLLVMforOp (i,op)
 
 getLLVMforOp :: (Int,Operator) -> [String]
 getLLVMforOp (i,Operation IncrementByte) = 
