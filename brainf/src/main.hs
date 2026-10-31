@@ -24,6 +24,8 @@ data Token =  JumpForwards
             | Input 
             | Output 
                 deriving (Show,Eq)
+data Repeat a = Repeat Int a
+    deriving (Show, Eq)
 
 tokenCharacterTable = [
     (JumpForwards,    '['),
@@ -184,10 +186,14 @@ generateMain ops =
     [indent "; ====== initial setup ======"] ++
     (indent <$> initialMainSetup) ++ 
     [indent "; ====== main program ======"] ++
-    (indent <$> (enumerate ops >>= generateLLVMForOp)) ++ 
+    (indent <$> ((flattenRepeats . enumerate) ops >>= generateLLVMForOp)) ++ 
     [indent "; ====== terminate program ======"] ++
     (indent <$> mainTermination) ++
     ["}"]
+    where
+        -- sequences like +++++ will translate to %b = add %a 5 rather than `add %d 1` repeated 5 times
+        eqRight (_,x) (_,y) = x == y
+        flattenRepeats = flattenRepeatsPredicate eqRight
 
 indent :: String -> String
 indent = ('\t' :)
@@ -202,72 +208,74 @@ initialMainSetup =
      "%dp = alloca ptr",
      "store ptr %memory, ptr %dp"                                       ]
 
-generateJumpLabel :: Int -> [String]
-generateJumpLabel i = 
-    ["br label %instruction_" ++ show i] ++
-    ["instruction_" ++ show i ++ ":"]
-
 enumerate = zip [0..]
 
-generateLLVMForOp :: (Int,Operator) -> [String]
-generateLLVMForOp (i,op) = getLLVMforOp (i,op)
-
-getLLVMforOp :: (Int,Operator) -> [String]
-getLLVMforOp (i,Operation IncrementByte) = 
-    [ printf "; increment value",
+generateLLVMForOp :: Repeat (Int,Operator) -> [String]
+generateLLVMForOp (Repeat n (i,Operation IncrementByte)) = 
+    [ printf "; increment value by %d" n,
       printf "%%ptr.%d = load ptr, ptr %%dp" i,
       printf "%%byte.%d = load i8, ptr %%ptr.%d" i i,
-      printf "%%byte.new.%d = add i8 1, %%byte.%d" i i,
+      printf "%%byte.new.%d = add i8 %d, %%byte.%d" i n i,
       printf "store i8 %%byte.new.%d, ptr %%ptr.%d" i i    ]
-getLLVMforOp (i,Operation DecrementByte) = 
-    [ printf "; decrement value",
+generateLLVMForOp (Repeat n (i,Operation DecrementByte)) = 
+    [ printf "; decrement value by %d" n,
       printf "%%ptr.%d = load ptr, ptr %%dp" i,
       printf "%%byte.%d = load i8, ptr %%ptr.%d" i i,
-      printf "%%byte.new.%d = sub i8 %%byte.%d, 1" i i,
+      printf "%%byte.new.%d = sub i8 %%byte.%d, %d" i i n,
       printf "store i8 %%byte.new.%d, ptr %%ptr.%d" i i    ]
-getLLVMforOp (i,Operation IncrementPointer) = 
-    [ printf "; shift data pointer right",
+generateLLVMForOp (Repeat n (i,Operation IncrementPointer)) = 
+    [ printf "; shift data pointer right %d times" n,
       printf "%%ptr.%d = load ptr, ptr %%dp" i,
-      printf "%%dp.new.%d = getelementptr [2 x i8], ptr %%ptr.%d, i64 0, i64 1" i i,
+      printf "%%dp.new.%d = getelementptr [2 x i8], ptr %%ptr.%d, i64 0, i64 %d" i i n,
       printf "store ptr %%dp.new.%d, ptr %%dp" i                        ]
-getLLVMforOp (i,Operation DecrementPointer) = 
-    [ printf "; shift data pointer left",
+generateLLVMForOp (Repeat n (i,Operation DecrementPointer)) = 
+    [ printf "; shift data pointer left %d times" n,
       printf "%%ptr.%d = load ptr, ptr %%dp" i,
-      printf "%%dp.new.%d = getelementptr [2 x i8], ptr %%ptr.%d, i64 0, i64 -1" i i,
+      printf "%%dp.new.%d = getelementptr [2 x i8], ptr %%ptr.%d, i64 0, i64 -%d" i i n,
       printf "store ptr %%dp.new.%d, ptr %%dp" i                        ]
-getLLVMforOp (i,Operation Output) = 
+generateLLVMForOp (Repeat n (i,Operation Output)) = [i..(i+n-1)] >>= \i ->  -- these cant really be optimised so just replicate them n times
     [ printf "; print byte",
       printf "%%ptr.%d = load ptr, ptr %%dp" i,
       printf "%%byte.%d = load i8, ptr %%ptr.%d" i i,
       printf "%%int.%d = sext i8 %%byte.%d to i32" i i,
       printf "call i32 @putchar(i32 %%int.%d)" i ]
-getLLVMforOp (i,Operation Input) = 
+generateLLVMForOp (Repeat n (i,Operation Input)) = [i..(n+i-1)] >>= \i ->
     [ printf "; get input byte",
       printf "%%ptr.%d = load ptr, ptr %%dp" i,
       printf "%%int.%d = call i32 @getchar()" i,
       printf "%%byte.%d = trunc i32 %%int.%d to i8" i i,
       printf "store i8 %%byte.%d, ptr %%ptr.%d" i i ]
-getLLVMforOp (i,Jump JumpForwards pos) = 
+-- all jumps are unique so crash and burn if repeat isnt 1
+generateLLVMForOp (Repeat 1 (i,Jump JumpForwards pos)) =
     [ printf "; forwards jump",
       printf "%%ptr.%d = load ptr, ptr %%dp" i,
       printf "%%byte.%d = load i8, ptr %%ptr.%d" i i,
       printf "%%condition.%d = icmp eq i8 %%byte.%d, 0" i i,
       printf "br i1 %%condition.%d, label %%instruction_%d, label %%instruction_%d" i pos (i+1),
       printf "instruction_%d:" (i+1)                                                            ]
-getLLVMforOp (i,Jump JumpBackwards pos) = 
+generateLLVMForOp (Repeat 1 (i,Jump JumpBackwards pos)) =
     [ printf "; backwards jump",
       printf "%%ptr.%d = load ptr, ptr %%dp" i,
       printf "%%byte.%d = load i8, ptr %%ptr.%d" i i,
       printf "%%condition.%d = icmp ne i8 %%byte.%d, 0" i i,
       printf "br i1 %%condition.%d, label %%instruction_%d, label %%instruction_%d" i pos (i+1),
       printf "instruction_%d:" (i+1)                                                            ]
-getLLVMforOp _ = []
+generateLLVMForOp _ = []
 
 flatten :: [[a]] -> [a]
 flatten = (>>= id)
 
+flattenRepeatsPredicate :: (a -> a -> Bool) -> [a] -> [Repeat a]
+flattenRepeatsPredicate p [] = []
+flattenRepeatsPredicate p (x:xs) = 
+    (\(l,r) -> (Repeat (1 + length l) x) : (flattenRepeatsPredicate p r))
+    $ span (p x) xs
+
 -- >>> flatten [[1,2],[3,4]]
 -- [1,2,3,4]
+
+-- >>> flattenRepeatsPredicate (==) [1,1,1,2,3]
+-- [Repeat 3 1,Repeat 1 2,Repeat 1 3]
 
 -- >>> run . parseDepth . lexer $ ['+' | _ <- [1..97]] ++ "." ++  ">" ++ ['+' | _ <- [1..10]] ++ "."
 
