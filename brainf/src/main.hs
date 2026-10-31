@@ -37,6 +37,7 @@ tokenCharacterTable = [
 
 main = do 
     args <- getArgs
+    hSetBuffering stdin NoBuffering
     case args of
         ["help"] -> showHelp
         ["compile",input] -> do 
@@ -136,7 +137,7 @@ parseJumpsHelper forwardJumpStack ((i,t):ts) =
 parseJumpsHelper _ [] = Just ([],[])
 
 run :: [Operator] -> IO ()
-run ts = evalLoop ts (listArray (0,255) ([0..255] >> [0])) 0 0 
+run ts = evalLoop ts (listArray (0,4096) ([0..255] >> [0])) 0 0 
 
 evalLoop :: [Operator] -> Array Int Word8 -> Int -> Int -> IO ()
 evalLoop ts mem ip dp
@@ -173,7 +174,9 @@ join seperator (x:xs) = (x ++ [seperator]) ++ join seperator xs
 
 globals = ["; globals"]
 
-functions = ["; libc declarations","declare i32 @putchar(i32) nounwind"]
+functions = [ "; libc declarations",
+              "declare i32 @putchar(i32) nounwind",
+              "declare i32 @getchar() nounwind"    ]
 
 generateMain :: [Operator] -> [String]
 generateMain ops = 
@@ -238,6 +241,12 @@ getLLVMforOp (i,Operation Output) =
       printf "%%byte.%d = load i8, ptr %%ptr.%d" i i,
       printf "%%int.%d = sext i8 %%byte.%d to i32" i i,
       printf "call i32 @putchar(i32 %%int.%d)" i ]
+getLLVMforOp (i,Operation Input) = 
+    [ printf "; get input byte",
+      printf "%%ptr.%d = load ptr, ptr %%dp" i,
+      printf "%%int.%d = call i32 @getchar()" i,
+      printf "%%byte.%d = trunc i32 %%int.%d to i8" i i,
+      printf "store i8 %%byte.%d, ptr %%ptr.%d" i i ]
 getLLVMforOp (i,Jump JumpForwards pos) = 
     [ printf "; forwards jump",
       printf "%%ptr.%d = load ptr, ptr %%dp" i,
