@@ -1,6 +1,9 @@
 module Main where
 import Data.List
+import System.Process
 import GHC.IO.Handle.Text
+import qualified Data.ByteString
+import Data.ByteString (ByteString)
 import System.IO
 import Text.Printf
 import Data.Array
@@ -39,11 +42,19 @@ main = do
         ["compile",input] -> do 
             file <- readFile input
             output <- return . compile $ file
-            flatMapEither (hPutStrLn stderr) (putStrLn) output
+            flatMapEither (hPutStrLn stderr) (putStr) output
         ["compile",inputFile,outputFile] -> do
             input <- readFile inputFile
             output <- return . compile $ input
-            flatMapEither (hPutStrLn stderr) (writeFile outputFile) output
+            case output of
+                Left e -> hPutStrLn stderr e
+                Right s -> 
+                    -- compilation pipeline
+                    pipeIntoCommand "llc" ["-o","-"] (packStr s) >>=
+                    pipeIntoCommand "as" ["-","-o",objectFile] >>
+                    callProcess "cc" [objectFile,"-o",outputFile] -- use cc so it links with c standard lib correctly
+                    where
+                        objectFile = replaceExtension ".o" inputFile
         ["interpret","-"] -> getContents >>= execute
         ["interpret",filename] -> readFile filename >>= execute
         _ -> showHelp
@@ -56,8 +67,29 @@ main = do
                 Just ops -> Right $ compileToLLVM ops
                 Nothing -> Left "failed to parse"
 
+packStr = Data.ByteString.pack . map (fromIntegral . ord)
+
+replaceExtension :: String -> String -> String
+replaceExtension _ [] = []
+replaceExtension replacement ('.':cs) = replacement
+replaceExtension replacement (c:cs) = c:(replaceExtension replacement cs)
+
 showHelp :: IO ()
-showHelp = putStrLn "usage: brainf <filename | '-'>"
+showHelp = putStrLn $
+    "usage: brainf <command>\n" ++
+    "commands:\n" ++ 
+    "   compile <input file> <output file> : compiles brainf into a binary\n" ++
+    "   interpret <input file>             : compiles brainf into a binary"
+    
+pipeIntoCommand :: String -> [String] -> ByteString -> IO ByteString
+pipeIntoCommand command args string = do
+    (Just hIn, Just hOut, _, _) <- createProcess (proc command args)
+        { std_out = CreatePipe,
+          std_in  = CreatePipe }
+    Data.ByteString.hPutStr hIn string
+    hClose hIn
+    Data.ByteString.hGetContents hOut
+
 
 flatMapEither :: (a -> c) -> (b -> c) -> Either a b -> c
 flatMapEither fLeft _ (Left v) = fLeft v
