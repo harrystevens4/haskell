@@ -15,6 +15,11 @@ fi
 mkdir $1
 mkdir "$1/src"
 touch "$1/src/main.hs"
+cat > "$1/.gitignore" << EOF
+$1
+src/Main.hi
+src/Main.o
+EOF
 cat > "$1/Makefile" << EOF
 $1 : src/main.hs
 	ghc \$^ -o \$@
