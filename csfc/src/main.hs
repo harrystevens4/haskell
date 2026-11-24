@@ -157,39 +157,20 @@ lex cs = do
                 <||> parseLiteral
             )
     ops <- lex remaining
-    pure (op : ops)
+    pure . applyNegative $ (op : ops)
+
+-- apply subtract as a negative e.g. - 5 * 10 is (-5) * 10
+applyNegative :: [Token] -> [Token]
+applyNegative (Operator a : Operator Sub : Literal c : ts)
+    | a /= RightBracket = Operator a : Literal (0 - c) : applyNegative ts
+applyNegative (t : ts) = t : applyNegative ts
+applyNegative [] = []
 
 -- >>> lex "(1+3) * (4/2)" >>= shunt
 -- Left "missing opening bracket"
 
 -- >>> parseInput "(1+2+3)" (parseOperator <||> parseConstant)
 -- Right (Operator LeftBracket,"1+2+3)")
-
--- deal with minus sign association with literals
--- lex (b : c : leftover)
---     | isNumber c && b == '-' = case (reads (b : c : leftover) :: [(Double, String)]) of
---         [(x, unparsed)] -> fmap (\ts -> Literal x : ts) $ lex unparsed
---         _ -> Left "error parsing double"
--- -- parse single char operators
--- lex (c : cs)
---     | isNumber c = case (reads (c : cs) :: [(Double, String)]) of
---         -- add a space so that any minus sign directly following a literal is treated as an operator
---         [(x, '-' : unparsed)] -> (\ts -> Literal x : ts) <$> (lex $ '-' : ' ' : unparsed)
---         [(x, unparsed)] -> (\ts -> Literal x : ts) <$> (lex unparsed)
---         _ -> Left "error parsing double"
--- -- parse brackets
--- lex ('(' : cs) = (\xs -> (Operator LeftBracket) : xs) <$> (lex cs)
--- lex (')' : cs) = (\xs -> (Operator RightBracket) : xs) <$> (lex cs)
--- -- parse an operator
--- lex (c : cs) =
---     ( case c of
---         '+' -> Right Add
---         '-' -> Right Sub
---         '*' -> Right Mult
---         '/' -> Right Div
---         _ -> Left "unknown operator"
---     )
---         >>= \op -> (\x -> (Operator op) : x) `fmap` (lex cs)
 
 -- >>> getRight . lex $ "(1-4)"
 -- [Operator LeftBracket,Literal 1.0,Operator Sub,Literal 4.0,Operator RightBracket]
@@ -335,6 +316,9 @@ getUnaryOperatorFunc Sin = sin
 getUnaryOperatorFunc Cos = cos
 getUnaryOperatorFunc Tan = tan
 
+-- >>> eval $ getRight $ lex "0 sin"
+-- Left "stack empty when applying operator"
+
 factorial :: Double -> Double
 factorial 0 = 1
 factorial n = n * (factorial $ n - 1)
@@ -349,13 +333,13 @@ applyOperator Sub [first] = Right [0 - first]
 applyOperator Add [first] = Right $ first : []
 applyOperator operator [first]
     | operator `elem` binaryOps = Right $ ((getBinaryOperatorFunc operator) first 1) : []
--- propper applicatino with 2 opperands
+-- propper application with 2 opperands
 applyOperator operator (first : second : others)
     | operator `elem` binaryOps = Right $ ((getBinaryOperatorFunc operator) second first) : others
 applyOperator operator _ = Left "stack empty when applying operator"
 
 applyUnaryOperator :: Operator -> [Double] -> Either String [Double]
-applyUnaryOperator Fact (x : xs) = Right $ factorial x : xs
+applyUnaryOperator op (x : xs) = Right $ getUnaryOperatorFunc op x : xs
 applyUnaryOperator _ _ = Left "stack empty when applying operator"
 
 -- >>> eval $ getRight . shunt . getRight $ lex "1 - 2"
