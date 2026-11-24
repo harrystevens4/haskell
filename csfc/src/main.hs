@@ -147,7 +147,6 @@ lex (' ' : cs) = lex cs
 lex ('\n' : cs) = lex cs
 lex ('\r' : cs) = lex cs
 lex ('\t' : cs) = lex cs
--- lex cs = fmap (\(x, xs) -> fmap (Operator x :) (lex xs)) $ parseInput cs parseSingleCharOperator
 lex cs = do
     (op, remaining) <-
         parseInput
@@ -166,7 +165,7 @@ lex cs = do
 -- >>> parseInput "(1+2+3)" (parseOperator <||> parseConstant)
 -- Right (Operator LeftBracket,"1+2+3)")
 
--- -- deal with minus sign association with literals
+-- deal with minus sign association with literals
 -- lex (b : c : leftover)
 --     | isNumber c && b == '-' = case (reads (b : c : leftover) :: [(Double, String)]) of
 --         [(x, unparsed)] -> fmap (\ts -> Literal x : ts) $ lex unparsed
@@ -182,7 +181,15 @@ lex cs = do
 -- lex ('(' : cs) = (\xs -> (Operator LeftBracket) : xs) <$> (lex cs)
 -- lex (')' : cs) = (\xs -> (Operator RightBracket) : xs) <$> (lex cs)
 -- -- parse an operator
--- lex (c : cs) = parseOperator c >>= \op -> (\x -> (Operator op) : x) `fmap` (lex cs)
+-- lex (c : cs) =
+--     ( case c of
+--         '+' -> Right Add
+--         '-' -> Right Sub
+--         '*' -> Right Mult
+--         '/' -> Right Div
+--         _ -> Left "unknown operator"
+--     )
+--         >>= \op -> (\x -> (Operator op) : x) `fmap` (lex cs)
 
 -- >>> getRight . lex $ "(1-4)"
 -- [Operator LeftBracket,Literal 1.0,Operator Sub,Literal 4.0,Operator RightBracket]
@@ -206,7 +213,7 @@ operatorBindingPower Mult = 2
 operatorBindingPower Div = 2
 operatorBindingPower Pow = 3
 operatorBindingPower Fact = 3
-operatorBindingPower _ = 4
+operatorBindingPower _ = 0
 
 -- compare by binding power
 instance Ord Token where
@@ -226,15 +233,16 @@ shunt ts = shuntHelper [] ts []
 -- shunting yard algorithm to convert infix into postfix
 --              stack      input      output
 shuntHelper :: [Token] -> [Token] -> [Token] -> Either String [Token]
--- pop stack onto output once we run out of input tokens
 shuntHelper stack [] output = Right $ output ++ stack
-shuntHelper stack (Operator op : ts) output
-    | op `elem` postfixOps = shuntHelper stack ts (output ++ [Operator op])
 shuntHelper stack ((Operator LeftBracket) : ts) output = shuntHelper ((Operator LeftBracket) : stack) ts output
 shuntHelper stack ((Operator RightBracket) : ts) output = do
     -- pop elements off the stack untill we find a matching opening bracket
-    (l, r) <- maybeToEither "missing opening bracket" (splitOnce (Operator LeftBracket) stack)
+    (l, r) <- maybeToEither ("missing opening bracket: stack is " ++ show stack ++ " output is " ++ show output) (splitOnce (Operator LeftBracket) stack)
     shuntHelper r ts (output ++ l)
+-- pop stack onto output once we run out of input tokens
+-- shuntHelper stack (Operator op : ts) output
+-- \| op `elem` postfixOps = shuntHelper stack ts (output ++ [Operator op])
+-- \| otherwise = shuntHelper stack ts (output ++ [Operator op])
 shuntHelper stack ((Operator op) : ts) output = result
   where
     -- pop elements off the stack untill we find an operator with a lower binding power
@@ -243,6 +251,9 @@ shuntHelper stack ((Operator op) : ts) output = result
     result = shuntHelper ((Operator op) : newStack) ts newOutput
 -- literals go straight to the output
 shuntHelper stack ((Literal value) : ts) output = shuntHelper (stack) ts $ output ++ [Literal value]
+
+-- >>> takeWhile (< 5) [1..10]
+-- ([1,2,3,4],[5,6,7,8,9,10])
 
 -- >>> splitOnce (Operator LeftBracket) [Literal 1, Operator LeftBracket, Literal 2]
 -- Just ([Literal 1.0],[Literal 2.0])
@@ -253,15 +264,21 @@ shuntHelper stack ((Literal value) : ts) output = shuntHelper (stack) ts $ outpu
 -- >>> getRight $ lex "(5)("
 -- [Operator LeftBracket,Literal 5.0,Operator RightBracket,Operator LeftBracket]
 
--- >>> shunt $ getRight $ lex "1+(-5)+1"
--- Right [Literal 1.0,Literal 5.0,Operator Sub,Operator Add,Literal 1.0,Operator Add]
+-- >>> lex "1+(-5)+1"
+-- Right [Literal 1.0,Operator Add,Operator LeftBracket,Operator Sub,Literal 5.0,Operator RightBracket,Operator Add,Literal 1.0]
 
--- >>> shunt $ getRight $ lex "(1 +2) * 3"
--- Right [Literal 1.0,Literal 2.0,Operator Add,Literal 3.0,Operator Mult,Operator LeftBracket]
+-- >>> shunt [Literal 1.0,Operator Add,Operator LeftBracket,Operator Sub,Literal 5.0,Operator RightBracket,Operator Add,Literal 1.0]
+-- Left "missing opening bracket: stack is [Operator Sub] output is [Literal 1.0,Operator LeftBracket,Operator Add,Literal 5.0]"
+
+-- >>> shunt [Operator Add,Operator LeftBracket, Operator Add, Literal 5.0, Operator RightBracket, Operator LeftBracket, Operator RightBracket, Literal 5.0]
+-- Left "missing opening bracket"
+
+-- >>> lex "(1 +2) * 3"
+-- Right [Operator LeftBracket,Literal 1.0,Operator Add,Literal 2.0,Operator RightBracket,Operator Mult,Literal 3.0]
 
 -- >>>shunt [Literal 1.0, Operator Add]
 
--- >>> takeWhile (>= Operator Mult) [Operator Add]
+-- >>> takeWhile (>= Operator Mult) [Operator Add   ]
 -- ([],[Operator Add])
 
 -- put values from list into fst while predicate holds then place remaining in snd
