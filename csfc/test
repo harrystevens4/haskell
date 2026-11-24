@@ -52,5 +52,12 @@ assert_output '(2*3)^2' 36
 assert_output '(-2)^3' -8
 assert_output '(-2)^4' 16
 assert_output '4^-1' 0.25
+assert_output '10!' 3628800
+assert_output '5! * 3 + 9' 369
+assert_output '3 * 5! + 9' 369
+assert_output '3 * (5! + 9)' 387
+assert_output '0!' 1
+assert_output 'sin 0' 0
+assert_output 'cos 0' 1
 
 echo "all tests pass"
