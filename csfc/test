@@ -4,11 +4,11 @@
 
 test_count=0
 assert_output() {
-	output="$(./csfc "$1")"
 	if [ -z $2 ]; then
 		echo "invalid arguments to assert"
 		exit 1
 	fi
+	output="$(./csfc "$1")"
 	if [ $? -ne 0 ]; then
 		echo "test $test_count failed"
 		echo "command returned with non zero exit status"
@@ -66,5 +66,9 @@ assert_output '3 * (5! + 9)' 387
 assert_output '0!' 1
 assert_output 'sin 0' 0
 assert_output 'cos 0' 1
+assert_output '1 + sin 0' 1
+assert_output '5 * cos 0' 5
+assert_output '5 * sin pi' 0
+assert_output '5 * cos (2 *pi)' 5
 
 echo "all tests pass"
