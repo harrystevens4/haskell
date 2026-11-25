@@ -1,9 +1,29 @@
 {-# LANGUAGE LambdaCase #-}
+-- >>> (\Add -> Sub) Add
+-- Sub
+-- binaryOps :: (Operator, Operator, Operator, Operator, Operator)
+-- evaluate the expression then print the result or error
+-- such sexy syntax
+-- im up in the club parsing it and by it i mean my lexemes
+-- ignore whitespace
+-- apply subtract as a negative e.g. - 5 * 10 is (-5) * 10
+-- >>> lex "(1+3) * (4/2)" >>= shunt
+-- Left "missing opening bracket"
+-- >>> parseInput "(1+2+3)" (parseOperator <||> parseConstant)
+-- Right (Operator LeftBracket,"1+2+3)")
+-- >>> getRight . lex $ "(1-4)"
+-- [Operator LeftBracket,Literal 1.0,Operator Sub,Literal 4.0,Operator RightBracket]
+-- cant find in standard library?
+-- >>> lex "1 2 +"
+-- Right [Literal 1.0,Literal 2.0,Operator Add]
+-- >>> (reads "1.1") :: [(Double,String)]
+-- [(1.1,"")]
+-- higher binding power is higher order of operations precidence
+{-# OPTIONS_GHC -W #-}
 
 module Main where
 
 import Control.Monad
-import Data.Char
 import System.Environment as SysEnv
 import System.Exit
 import System.IO
@@ -34,7 +54,7 @@ Parser f <||> Parser g = Parser $ \x -> f x `eitherOr` g x
 
 eitherOr :: Either e a -> Either e a -> Either e a
 eitherOr (Right a) (_) = Right a
-eitherOr (Left e) (b) = b
+eitherOr (Left _) (b) = b
 
 instance Functor Parser where
     fmap :: (a -> b) -> Parser a -> Parser b
@@ -59,7 +79,7 @@ instance Monad Parser where
     (>>=) :: Parser a -> (a -> Parser b) -> Parser b
     Parser f >>= g = Parser $ \x -> case (f x) of
         Left e -> Left e
-        Right (r, s) -> parseInput x (g r)
+        Right (r, _) -> parseInput x (g r)
 
 parseInput :: String -> Parser a -> Either String (a, String)
 parseInput s (Parser f) = f s
@@ -84,7 +104,6 @@ prefixOps =
     , Tan
     ]
 
--- binaryOps :: (Operator, Operator, Operator, Operator, Operator)
 binaryOps =
     [ Add
     , Sub
@@ -100,14 +119,12 @@ main = do
         [] -> getContents >>= calculateThenPrint
         _ -> putStrLn "Usage: csfc \"expression\""
 
--- evaluate the expression then print the result or error
 calculateThenPrint :: String -> IO ()
 calculateThenPrint expr = case calculate expr of
     Right result -> print result >> exitSuccess
     Left e -> hPutStrLn stderr e >> exitFailure
 
 calculate :: String -> Either String Double
--- such sexy syntax
 calculate expr = lex expr >>= shunt >>= eval
 
 parseConstant :: Parser Token
@@ -133,16 +150,15 @@ parseOperator = fmap Operator <$> Parser $ \case
     ('^' : cs) -> Right (Pow, cs)
     ('!' : cs) -> Right (Fact, cs)
     (c : _) -> Left $ "single character " ++ show c ++ " did not match known operator"
+    _ -> Left "no characters left to parse"
 
 parseLiteral :: Parser Token
 parseLiteral = fmap Literal $ Parser $ \x -> case reads x of
     (x : _) -> Right x
     [] -> Left $ "unknown literal " ++ show x
 
--- im up in the club parsing it and by it i mean my lexemes
 lex :: String -> Either String [Token]
 lex [] = Right []
--- ignore whitespace
 lex (' ' : cs) = lex cs
 lex ('\n' : cs) = lex cs
 lex ('\r' : cs) = lex cs
@@ -159,34 +175,16 @@ lex cs = do
     ops <- lex remaining
     pure . applyNegative $ (op : ops)
 
--- apply subtract as a negative e.g. - 5 * 10 is (-5) * 10
 applyNegative :: [Token] -> [Token]
 applyNegative (Operator a : Operator Sub : Literal c : ts)
     | a /= RightBracket = Operator a : Literal (0 - c) : applyNegative ts
 applyNegative (t : ts) = t : applyNegative ts
 applyNegative [] = []
 
--- >>> lex "(1+3) * (4/2)" >>= shunt
--- Left "missing opening bracket"
-
--- >>> parseInput "(1+2+3)" (parseOperator <||> parseConstant)
--- Right (Operator LeftBracket,"1+2+3)")
-
--- >>> getRight . lex $ "(1-4)"
--- [Operator LeftBracket,Literal 1.0,Operator Sub,Literal 4.0,Operator RightBracket]
-
--- cant find in standard library?
 maybeToEither :: a -> Maybe b -> Either a b
-maybeToEither e (Just x) = Right x
+maybeToEither _ (Just x) = Right x
 maybeToEither e (Nothing) = Left e
 
--- >>> lex "1 2 +"
--- Right [Literal 1.0,Literal 2.0,Operator Add]
-
--- >>> (reads "1.1") :: [(Double,String)]
--- [(1.1,"")]
-
--- higher binding power is higher order of operations precidence
 operatorBindingPower :: Operator -> Int
 operatorBindingPower Add = 1
 operatorBindingPower Sub = 1
@@ -194,7 +192,13 @@ operatorBindingPower Mult = 2
 operatorBindingPower Div = 2
 operatorBindingPower Pow = 3
 operatorBindingPower Fact = 3
-operatorBindingPower _ = 0
+operatorBindingPower x
+    | x `elem` prefixOps = 10
+    | x `elem` [LeftBracket, RightBracket] = 0
+    | otherwise = undefined
+
+-- >>> LeftBracket `elem` [LeftBracket,RightBracket]
+-- True
 
 -- compare by binding power
 instance Ord Token where
@@ -239,8 +243,8 @@ shuntHelper stack ((Literal value) : ts) output = shuntHelper (stack) ts $ outpu
 -- >>> splitOnce (Operator LeftBracket) [Literal 1, Operator LeftBracket, Literal 2]
 -- Just ([Literal 1.0],[Literal 2.0])
 
--- >>> shunt $ getRight $ lex "1 + 1 * 2"
--- Right [Literal 1.0,Literal 1.0,Literal 2.0,Operator Mult,Operator Add]
+-- >>> shunt $ getRight $ lex "1 + sin 0"
+-- Right [Literal 1.0,Literal 0.0,Operator Sin,Operator Add]
 
 -- >>> getRight $ lex "(5)("
 -- [Operator LeftBracket,Literal 5.0,Operator RightBracket,Operator LeftBracket]
@@ -264,7 +268,7 @@ shuntHelper stack ((Literal value) : ts) output = shuntHelper (stack) ts $ outpu
 
 -- put values from list into fst while predicate holds then place remaining in snd
 takeWhile :: (Ord a) => (a -> Bool) -> [a] -> ([a], [a])
-takeWhile p [] = ([], [])
+takeWhile _ [] = ([], [])
 takeWhile p (x : xs)
     | p x = (\(l, r) -> (x : l, r)) $ takeWhile p xs
     | otherwise = ([], x : xs)
@@ -277,7 +281,7 @@ splitOnce :: (Eq a) => a -> [a] -> Maybe ([a], [a])
 splitOnce deliminator (top : base)
     | top == deliminator = Just ([], base) -- freaky ahh fmap
     | otherwise = (\(l, r) -> (top : l, r)) <$> splitOnce deliminator base
-splitOnce deliminator [] = Nothing
+splitOnce _ [] = Nothing
 
 -- >>> splitOnce '=' "this=that"
 -- Just ("this","that")
@@ -291,12 +295,13 @@ eval ts = evalHelper [] ts
 
 getRight :: Either a b -> b
 getRight (Right b) = b
+getRight _ = undefined
 
 -- stack based postfix expression evaluator
 evalHelper :: [Double] -> [Token] -> Either String Double
 -- base cases
 evalHelper [result] [] = Right result
-evalHelper stack [] = Left "result of calculation did not yield 1 item on the stack"
+evalHelper _ [] = Left "result of calculation did not yield 1 item on the stack"
 -- stack evaluating
 evalHelper stack ((Literal x) : ts) = evalHelper (x : stack) ts
 evalHelper stack ((Operator op) : ts) = case applyOperator op stack of
@@ -309,15 +314,25 @@ getBinaryOperatorFunc Sub = (-)
 getBinaryOperatorFunc Mult = (*)
 getBinaryOperatorFunc Div = (/)
 getBinaryOperatorFunc Pow = (**) -- this one supports fractional exponents
+getBinaryOperatorFunc _ = undefined
 
 getUnaryOperatorFunc :: Operator -> Double -> Double
 getUnaryOperatorFunc Fact = factorial
-getUnaryOperatorFunc Sin = sin
-getUnaryOperatorFunc Cos = cos
-getUnaryOperatorFunc Tan = tan
+getUnaryOperatorFunc Sin = roundToWhole . sin
+getUnaryOperatorFunc Cos = roundToWhole . cos
+getUnaryOperatorFunc Tan = roundToWhole . tan
+getUnaryOperatorFunc _ = undefined
 
 -- >>> eval $ getRight $ lex "0 sin"
 -- Left "stack empty when applying operator"
+
+epsilon = 1e-15
+
+roundToWhole :: Double -> Double
+roundToWhole x =
+    if (abs $ (fromIntegral . round $ x) - x) <= epsilon
+        then fromIntegral . round $ x
+        else x
 
 factorial :: Double -> Double
 factorial 0 = 1
@@ -336,7 +351,7 @@ applyOperator operator [first]
 -- propper application with 2 opperands
 applyOperator operator (first : second : others)
     | operator `elem` binaryOps = Right $ ((getBinaryOperatorFunc operator) second first) : others
-applyOperator operator _ = Left "stack empty when applying operator"
+applyOperator _ _ = Left "stack empty when applying operator"
 
 applyUnaryOperator :: Operator -> [Double] -> Either String [Double]
 applyUnaryOperator op (x : xs) = Right $ getUnaryOperatorFunc op x : xs
