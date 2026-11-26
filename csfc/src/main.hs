@@ -193,14 +193,15 @@ mapLeft _ (Right b) = Right b
 lex :: String -> Either String [Token]
 lex cs =
     mapLeft
-        ( \i -> let newline = "\n" ++ replicate i ' ' in
-            cs 
-                ++ newline
-                ++ "^"
-                ++ newline
-                ++ "|"
-                ++ newline
-                ++ "lexer error here"
+        ( \i ->
+            let newline = "\n" ++ replicate i ' '
+             in cs
+                    ++ newline
+                    ++ "^"
+                    ++ newline
+                    ++ "|"
+                    ++ newline
+                    ++ "lexer error here"
         )
         $ lex' cs
 
@@ -273,7 +274,7 @@ shunt ts = do
             )
             (Right $ ShuntState [] [])
             (zip ts [1 ..])
-    case findIndex (== LeftBracket) stack of
+    case findIndex (== LeftBracket) (filter (== LeftBracket) stack) of
         Nothing -> Right $ output ++ (Operator <$> stack)
         Just i -> Left $ showTokens (take (1 + (findIndices (== Operator LeftBracket) ts !! i)) ts) ++ " <- failed to shunt here: mismatched opening bracket"
 
