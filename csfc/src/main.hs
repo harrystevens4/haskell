@@ -25,6 +25,7 @@ module Main where
 
 import Control.Monad
 import Data.List hiding (takeWhile)
+import Data.Maybe
 import System.Environment as SysEnv
 import System.Exit
 import System.IO
@@ -132,6 +133,22 @@ binaryOps =
     , Pow
     ]
 
+flipTuples :: [(a, b)] -> [(b, a)]
+flipTuples = fmap (uncurry $ flip (,))
+
+startsWith :: String -> String -> Bool
+startsWith a b = foldr (\(a, b) x -> x && a == b) True (zip a b)
+
+greedyMatch :: String -> String -> (Bool, String)
+greedyMatch (a : as) (b : bs)
+    | a == b = greedyMatch as bs
+    | otherwise = (False, b : bs)
+greedyMatch [] b = (True, b)
+greedyMatch _ [] = (False, "")
+
+-- >>> greedyMatch "abc" "aabcdef"
+-- (False,"abcdef")
+
 main = do
     args <- SysEnv.getArgs
     case args of
@@ -152,25 +169,17 @@ parseConstant = fmap Literal $ Parser $ \case
     ('p' : 'i' : cs) -> Right (pi, cs)
     cs -> Left $ "unknown constant " ++ show cs
 
-parseFunction :: Parser Token
-parseFunction = fmap Operator $ Parser $ \case
-    ('s' : 'i' : 'n' : cs) -> Right (Sin, cs)
-    ('c' : 'o' : 's' : cs) -> Right (Cos, cs)
-    ('t' : 'a' : 'n' : cs) -> Right (Tan, cs)
-    cs -> Left $ "unknown function " ++ show cs
-
 parseOperator :: Parser Token
-parseOperator = fmap Operator <$> Parser $ \case
-    ('(' : cs) -> Right (LeftBracket, cs)
-    (')' : cs) -> Right (RightBracket, cs)
-    ('+' : cs) -> Right (Add, cs)
-    ('-' : cs) -> Right (Sub, cs)
-    ('/' : cs) -> Right (Div, cs)
-    ('*' : cs) -> Right (Mult, cs)
-    ('^' : cs) -> Right (Pow, cs)
-    ('!' : cs) -> Right (Fact, cs)
-    (c : _) -> Left $ "single character " ++ show c ++ " did not match known operator"
-    _ -> Left "no characters left to parse"
+parseOperator = Parser $
+    \x ->
+        maybeToEither "unknown operator" $
+            listToMaybe
+                ( do
+                    (op, str) <- operatorMap
+                    case greedyMatch str x of
+                        (True, xs) -> [(Operator op, xs)]
+                        (False, _) -> []
+                )
 
 parseLiteral :: Parser Token
 parseLiteral = fmap Literal $ Parser $ \x -> case reads x of
@@ -187,10 +196,9 @@ lex cs = do
     (op, remaining) <-
         parseInput
             cs
-            ( parseOperator
-                <||> parseFunction
-                <||> parseConstant
+            ( parseConstant
                 <||> parseLiteral
+                <||> parseOperator
             )
     ops <- lex remaining
     pure . applyNegative $ (op : ops)
@@ -237,8 +245,6 @@ showToken (Literal x) = show x
 showToken (Operator x) = (\(Just a) -> a) $ lookup x operatorMap
 
 shunt :: [Token] -> Either String [Token]
--- start with an empty stack and output
--- shunt ts = shuntHelper [] ts []
 shunt ts = do
     (ShuntState stack output) <-
         foldl
