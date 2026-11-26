@@ -186,21 +186,26 @@ parseLiteral = fmap Literal $ Parser $ \x -> case reads x of
     (x : _) -> Right x
     [] -> Left $ "unknown literal " ++ show x
 
+mapLeft :: (a -> c) -> Either a b -> Either c b
+mapLeft f (Left a) = Left $ f a
+mapLeft _ (Right b) = Right b
+
 lex :: String -> Either String [Token]
 lex [] = Right []
-lex (' ' : cs) = lex cs
-lex ('\n' : cs) = lex cs
-lex ('\r' : cs) = lex cs
-lex ('\t' : cs) = lex cs
+lex (' ' : cs) = mapLeft (' ' :) $ lex cs
+lex ('\n' : cs) = mapLeft ('\n' :) $ lex cs
+lex ('\r' : cs) = mapLeft ('\r' :) $ lex cs
+lex ('\t' : cs) = mapLeft ('\t' :) $ lex cs
 lex cs = do
     (op, remaining) <-
-        parseInput
-            cs
-            ( parseConstant
-                <||> parseLiteral
-                <||> parseOperator
-            )
-    ops <- lex remaining
+        mapLeft ("<- lex error near here: " ++) $
+            parseInput
+                cs
+                ( parseConstant
+                    <||> parseOperator
+                    <||> parseLiteral
+                )
+    ops <- mapLeft (\x -> take (length cs - length remaining) cs ++ x) $ lex remaining
     pure . applyNegative $ (op : ops)
 
 applyNegative :: [Token] -> [Token]
@@ -330,8 +335,8 @@ shuntToken (Literal value) s = Right $ sMapOutput (++ [Literal value]) s
 -- >>> shunt [Operator Add,Operator LeftBracket, Operator Add, Literal 5.0, Operator RightBracket, Operator LeftBracket, Operator RightBracket, Literal 5.0]
 -- Left "missing opening bracket"
 
--- >>> lex "(1 +2) * 3"
--- Right [Operator LeftBracket,Literal 1.0,Operator Add,Literal 2.0,Operator RightBracket,Operator Mult,Literal 3.0]
+-- >>> lex "10-4"
+-- Right [Literal 10.0,Literal (-4.0)]
 
 -- >>>shunt [Literal 1.0, Operator Add]
 
