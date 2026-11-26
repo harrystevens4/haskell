@@ -24,7 +24,7 @@
 module Main where
 
 import Control.Monad
-import Control.Monad.State.Lazy
+import Data.List hiding (takeWhile)
 import System.Environment as SysEnv
 import System.Exit
 import System.IO
@@ -239,9 +239,9 @@ showToken (Operator x) = (\(Just a) -> a) $ lookup x operatorMap
 shunt :: [Token] -> Either String [Token]
 -- start with an empty stack and output
 -- shunt ts = shuntHelper [] ts []
-shunt ts =
-    (\(ShuntState stack output) -> output ++ (Operator <$> stack))
-        <$> foldl
+shunt ts = do
+    (ShuntState stack output) <-
+        foldl
             ( \acc (t, i) -> do
                 state <- acc
                 case shuntToken t state of
@@ -250,6 +250,9 @@ shunt ts =
             )
             (Right $ ShuntState [] [])
             (zip ts [1 ..])
+    case findIndex (== LeftBracket) stack of
+        Nothing -> Right $ output ++ (Operator <$> stack)
+        Just i -> Left $ showTokens (take (1 + (findIndices (== Operator LeftBracket) ts !! i)) ts) ++ " <- failed to shunt here: mismatched opening bracket"
 
 -- >>> :t (ShuntState [], [], Right [])
 -- (ShuntState [], [], Right [])
