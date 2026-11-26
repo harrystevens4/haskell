@@ -24,13 +24,19 @@
 module Main where
 
 import Control.Monad
+import Control.Monad.State.Lazy
 import System.Environment as SysEnv
 import System.Exit
 import System.IO
-import Text.Read hiding (lex)
+import Text.Read hiding (get, lex)
 import Prelude hiding (lex, takeWhile)
 
 data Token = Literal Double | Operator Operator deriving (Show, Eq)
+
+data ShuntState = ShuntState
+    { stack :: [Operator]
+    , output :: [Token]
+    }
 
 data Operator
     = Add
@@ -86,6 +92,20 @@ parseInput s (Parser f) = f s
 
 mapFst :: (a -> c) -> (a, b) -> (c, b)
 mapFst f (a, b) = (f a, b)
+
+operatorMap =
+    [ (Add, "+")
+    , (Sub, "-")
+    , (Mult, "*")
+    , (Div, "/")
+    , (Fact, "!")
+    , (Sin, "sin")
+    , (Cos, "cos")
+    , (Tan, "tan")
+    , (Pow, "^")
+    , (LeftBracket, "(")
+    , (RightBracket, ")")
+    ]
 
 unaryOps =
     [ Fact
@@ -211,31 +231,71 @@ instance Ord Operator where
     x >= y = operatorBindingPower x >= operatorBindingPower y
     x <= y = operatorBindingPower x <= operatorBindingPower y
 
+showTokens :: [Token] -> String
+showTokens = unwords . (fmap showToken)
+showToken (Literal x) = show x
+showToken (Operator x) = (\(Just a) -> a) $ lookup x operatorMap
+
 shunt :: [Token] -> Either String [Token]
 -- start with an empty stack and output
-shunt ts = shuntHelper [] ts []
+-- shunt ts = shuntHelper [] ts []
+shunt ts =
+    (\(ShuntState stack output) -> output ++ (Operator <$> stack))
+        <$> foldl
+            ( \acc (t, i) -> do
+                state <- acc
+                case shuntToken t state of
+                    Left e -> Left $ showTokens (take i ts) ++ " <- failed to shunt here: " ++ e
+                    Right x -> Right x
+            )
+            (Right $ ShuntState [] [])
+            (zip ts [1 ..])
+
+-- >>> :t (ShuntState [], [], Right [])
+-- (ShuntState [], [], Right [])
+--   :: ([Token] -> Either String [Token] -> ShuntState, [a1],
+--       Either a2 [a3])
+
+sMapStack :: ([Operator] -> [Operator]) -> ShuntState -> ShuntState
+sMapStack f s = s{stack = f (stack s)}
+
+sMapOutput :: ([Token] -> [Token]) -> ShuntState -> ShuntState
+sMapOutput f s = s{output = f (output s)}
+
+shuntToken :: Token -> ShuntState -> Either String ShuntState
+shuntToken (Operator LeftBracket) s = Right . sMapStack (LeftBracket :) $ s
+shuntToken (Operator RightBracket) s = do
+    (newOutput, newStack) <-
+        maybeToEither
+            "missing opening bracket"
+            (splitOnce LeftBracket (stack s))
+    pure . (sMapStack $ const newStack) . (sMapOutput (++ (Operator <$> newOutput))) $ s
+shuntToken (Operator op) s = do
+    let (opsToPush, newStack) = takeWhile (>= op) (stack s)
+    pure . (sMapStack $ const (op : newStack)) . (sMapOutput (++ (Operator <$> opsToPush))) $ s
+shuntToken (Literal value) s = Right $ sMapOutput (++ [Literal value]) s
 
 -- shunting yard algorithm to convert infix into postfix
 --              stack      input      output
-shuntHelper :: [Token] -> [Token] -> [Token] -> Either String [Token]
-shuntHelper stack [] output = Right $ output ++ stack
-shuntHelper stack ((Operator LeftBracket) : ts) output = shuntHelper ((Operator LeftBracket) : stack) ts output
-shuntHelper stack ((Operator RightBracket) : ts) output = do
-    -- pop elements off the stack untill we find a matching opening bracket
-    (l, r) <- maybeToEither ("missing opening bracket: stack is " ++ show stack ++ " output is " ++ show output) (splitOnce (Operator LeftBracket) stack)
-    shuntHelper r ts (output ++ l)
--- pop stack onto output once we run out of input tokens
--- shuntHelper stack (Operator op : ts) output
--- \| op `elem` postfixOps = shuntHelper stack ts (output ++ [Operator op])
--- \| otherwise = shuntHelper stack ts (output ++ [Operator op])
-shuntHelper stack ((Operator op) : ts) output = result
-  where
-    -- pop elements off the stack untill we find an operator with a lower binding power
-    (opsToPush, newStack) = takeWhile (>= Operator op) stack
-    newOutput = output ++ opsToPush
-    result = shuntHelper ((Operator op) : newStack) ts newOutput
--- literals go straight to the output
-shuntHelper stack ((Literal value) : ts) output = shuntHelper (stack) ts $ output ++ [Literal value]
+-- shuntHelper :: [Token] -> [Token] -> [Token] -> Either String [Token]
+-- shuntHelper stack [] output = Right $ output ++ stack
+-- shuntHelper stack ((Operator LeftBracket) : ts) output = shuntHelper ((Operator LeftBracket) : stack) ts output
+-- shuntHelper stack ((Operator RightBracket) : ts) output = do
+--     -- pop elements off the stack untill we find a matching opening bracket
+--     (l, r) <- maybeToEither ("missing opening bracket: stack is " ++ show stack ++ " output is " ++ show output) (splitOnce (Operator LeftBracket) stack)
+--     shuntHelper r ts (output ++ l)
+-- -- pop stack onto output once we run out of input tokens
+-- -- shuntHelper stack (Operator op : ts) output
+-- -- \| op `elem` postfixOps = shuntHelper stack ts (output ++ [Operator op])
+-- -- \| otherwise = shuntHelper stack ts (output ++ [Operator op])
+-- shuntHelper stack ((Operator op) : ts) output = result
+--   where
+--     -- pop elements off the stack untill we find an operator with a lower binding power
+--     (opsToPush, newStack) = takeWhile (>= Operator op) stack
+--     newOutput = output ++ opsToPush
+--     result = shuntHelper ((Operator op) : newStack) ts newOutput
+-- -- literals go straight to the output
+-- shuntHelper stack ((Literal value) : ts) output = shuntHelper (stack) ts $ output ++ [Literal value]
 
 -- >>> takeWhile (< 5) [1..10]
 -- ([1,2,3,4],[5,6,7,8,9,10])
@@ -243,8 +303,11 @@ shuntHelper stack ((Literal value) : ts) output = shuntHelper (stack) ts $ outpu
 -- >>> splitOnce (Operator LeftBracket) [Literal 1, Operator LeftBracket, Literal 2]
 -- Just ([Literal 1.0],[Literal 2.0])
 
--- >>> shunt $ getRight $ lex "1 + sin 0"
--- Right [Literal 1.0,Literal 0.0,Operator Sin,Operator Add]
+-- >>> shunt $ getRight $ lex "+"
+-- Right []
+
+-- >>> shunt $ getRight $ lex "(1+3) * (4/2)"
+-- Right [Operator LeftBracket]
 
 -- >>> getRight $ lex "(5)("
 -- [Operator LeftBracket,Literal 5.0,Operator RightBracket,Operator LeftBracket]
