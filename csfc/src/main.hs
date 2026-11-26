@@ -191,21 +191,33 @@ mapLeft f (Left a) = Left $ f a
 mapLeft _ (Right b) = Right b
 
 lex :: String -> Either String [Token]
-lex [] = Right []
-lex (' ' : cs) = mapLeft (' ' :) $ lex cs
-lex ('\n' : cs) = mapLeft ('\n' :) $ lex cs
-lex ('\r' : cs) = mapLeft ('\r' :) $ lex cs
-lex ('\t' : cs) = mapLeft ('\t' :) $ lex cs
-lex cs = do
+lex cs =
+    mapLeft
+        ( \i -> let newline = "\n" ++ replicate i ' ' in
+            cs 
+                ++ newline
+                ++ "^"
+                ++ newline
+                ++ "|"
+                ++ newline
+                ++ "lexer error here"
+        )
+        $ lex' cs
+
+lex' :: String -> Either Int [Token]
+lex' [] = Right []
+lex' (c : cs)
+    | c `elem` " \n\r\t" = mapLeft (+ 1) $ lex' cs
+lex' cs = do
     (op, remaining) <-
-        mapLeft ("<- lex error near here: " ++) $
+        mapLeft (const 0) $
             parseInput
                 cs
                 ( parseConstant
                     <||> parseOperator
                     <||> parseLiteral
                 )
-    ops <- mapLeft (\x -> take (length cs - length remaining) cs ++ x) $ lex remaining
+    ops <- mapLeft (+ (length cs - length remaining)) $ lex' remaining
     pure . applyNegative $ (op : ops)
 
 applyNegative :: [Token] -> [Token]
